@@ -7,12 +7,14 @@ import {
   IndexMapSchema,
   SessionSchema,
   DraftSessionSchema,
+  MistakeSchema,
   type Item,
   type ScheduleMap,
   type ScheduleEntry,
   type IndexMap,
   type IndexEntry,
   type Session,
+  type Mistake,
 } from './schemas.js';
 
 // ============================================================
@@ -29,6 +31,7 @@ export const DATA_DIR = process.env.LEARN_DATA_DIR
 export const ITEMS_FILE = path.join(DATA_DIR, 'items.jsonl');
 export const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 export const INDEX_FILE = path.join(DATA_DIR, 'index.json');
+export const MISTAKES_FILE = path.join(DATA_DIR, 'mistakes.jsonl');
 export const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 export const DRAFTS_DIR = path.join(DATA_DIR, 'drafts');
 
@@ -230,4 +233,65 @@ export async function deleteDraftSession(id: string): Promise<void> {
   } catch (e: any) {
     if (e?.code !== 'ENOENT') throw e;
   }
+}
+
+// ============================================================
+// Mistakes (错题本, JSONL append-only)
+// ============================================================
+
+export async function appendMistake(mistake: Mistake): Promise<void> {
+  await ensureDirs();
+  const line = JSON.stringify(MistakeSchema.parse(mistake)) + '\n';
+  await fs.appendFile(MISTAKES_FILE, line, 'utf8');
+}
+
+export async function readAllMistakes(): Promise<Mistake[]> {
+  try {
+    const text = await fs.readFile(MISTAKES_FILE, 'utf8');
+    return text
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((line, idx) => {
+        try {
+          return MistakeSchema.parse(JSON.parse(line));
+        } catch (err) {
+          throw new Error(`Invalid mistake at line ${idx + 1}: ${(err as Error).message}`);
+        }
+      });
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+/**
+ * 取最近 N 天未解决的错题（按出现时间倒序）
+ */
+export async function readRecentMistakes(opts: { days?: number; limit?: number } = {}): Promise<Mistake[]> {
+  const days = opts.days ?? 30;
+  const limit = opts.limit ?? 20;
+  const cutoff = Date.now() - days * 24 * 3600 * 1000;
+  const all = await readAllMistakes();
+  return all
+    .filter((m) => !m.resolved && new Date(m.occurredAt).getTime() >= cutoff)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .slice(0, limit);
+}
+
+/**
+ * 标记某个 itemId 关联的错题为已解决（用户连续答对后调用）
+ */
+export async function resolveMistakesForItem(itemId: string): Promise<number> {
+  const all = await readAllMistakes();
+  let changed = 0;
+  for (const m of all) {
+    if (m.itemId === itemId && !m.resolved) {
+      m.resolved = true;
+      changed++;
+    }
+  }
+  if (changed === 0) return 0;
+  const text = all.map((m) => JSON.stringify(m)).join('\n') + '\n';
+  await atomicWriteText(MISTAKES_FILE, text);
+  return changed;
 }

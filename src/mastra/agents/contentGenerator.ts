@@ -18,12 +18,39 @@ const SYSTEM = `你是一个英语学习题目生成助手。
 - cloze: 完形填空。prompt.cloze 是含 ___ 的英文句子，answer.en 是填入的词/短语，distractors 3 个同词性候选。
 
 **质量约束**：
-1. distractors（迷惑选项）必须与答案同词性、长度接近、属同一语义场；不得包含正确答案。
-2. hints.weak = 弱提示（类别/词性/首字母/中文释义大类）；hints.strong = 强提示（接近答案但不直给）。
-3. 单词或短语题（answer.en 为 ≤3 个英文 token）必须填写 phonetics.ipa（IPA 国际音标，含 / /）；句子题留空。
-4. 每题打 langTags（自由词表，建议参考：${SUGGESTED_LANG_TAGS.join(', ')}）。
-5. difficulty: 1=基础常用, 3=中等, 5=罕见/复杂。按场景受众估计。
-6. 不要重复已有指纹列出的题目（同 prompt+answer 视为重复）。
+1. hints.weak = 弱提示（类别/词性/首字母/中文释义大类）；hints.strong = 强提示（接近答案但不直给）。
+2. 单词或短语题（answer.en 为 ≤3 个英文 token）必须填写 phonetics.ipa（IPA 国际音标，含 / /）；句子题留空。
+3. 每题打 langTags（自由词表，建议参考：${SUGGESTED_LANG_TAGS.join(', ')}）。
+4. difficulty: 1=基础常用, 3=中等, 5=罕见/复杂。按场景受众估计。
+5. 不要重复已有指纹列出的题目（同 prompt+answer 视为重复）。
+
+**distractors（迷惑选项）质量铁律 —— 极其重要**：
+
+✅ 合格的干扰项必须满足全部条件：
+- 在语法形态上与正确答案一致（动词配动词、名词配名词、形容词配形容词、过去式配过去式）
+- 长度与正确答案接近（差距 ≤50%）
+- 在该语境下**确定是错的**，意思与正确答案**明显不同**
+- 是该领域用户可能听过、不算太冷门的词
+
+❌ 绝对禁止：
+- 同义词或近义词（"happy" vs "joyful" → 用户会困惑哪个才对）
+- 拼写微改（"receive" vs "recieve" → 这是拼写题不是理解题）
+- 把正确答案稍作变形（"go" vs "going" vs "goes" 同时出现）
+- 几乎都是对的（"please help me" vs "could you help me" vs "can you help me"）
+
+**Good / Bad 示例**
+
+题面: "umbrella" → 正确答案: "雨伞"
+- ✅ 好的 distractors: ["雨衣", "拐杖", "帽子"]  ← 都是物品、都是雨天/穿戴相关但意思明确不同
+- ❌ 差的 distractors: ["雨具", "遮雨工具", "挡雨的东西"]  ← 都几乎对
+
+题面: "我请客" → 正确答案: "It's on me"
+- ✅ 好的 distractors: ["I'm broke", "Let's split it", "Pay your own"]  ← 都是关于结账的表达但意思明确不同
+- ❌ 差的 distractors: ["It's my treat", "I'll pay", "I got this"]  ← 全是"我请客"的同义表达
+
+cloze: "I ___ to the gym every morning." → 正确: "go"
+- ✅ 好的 distractors: ["eat", "sleep", "drive"]  ← 同为动词原形，但语义明确不通
+- ❌ 差的 distractors: ["went", "goes", "going"]  ← 仅时态/形态差别，语法题不是理解题
 
 **风格**：
 - en2cn / cn2en 题面要简洁，answer 给出最常用译法。
@@ -52,6 +79,8 @@ export async function generateItems(opts: {
   existingFingerprints: string[];
   // 题型分布建议（可选）：{en2cn: 0.3, cn2en: 0.3, translate: 0.2, cloze: 0.2}
   typeMix?: Partial<Record<GeneratedItem['type'], number>>;
+  // 用户最近常错的表达 —— 让生成器针对性出类似练习
+  recentMistakes?: Array<{ prompt: string; correctAnswer: string; userAnswer: string; suggestion?: string }>;
 }): Promise<{ items: GeneratedItem[]; model: string }> {
   const mix = opts.typeMix ?? { en2cn: 0.35, cn2en: 0.35, translate: 0.15, cloze: 0.15 };
   const dist = Object.entries(mix)
@@ -62,12 +91,19 @@ export async function generateItems(opts: {
     ? `\n\n已有指纹（避免重复）：\n${opts.existingFingerprints.slice(0, 300).join('\n')}`
     : '';
 
+  const mistakeHint = opts.recentMistakes && opts.recentMistakes.length
+    ? `\n\n**用户最近常错的表达（请针对性出一些相关练习，覆盖同样的考点但用不同的题面，帮助用户巩固）**：\n${opts.recentMistakes
+        .slice(0, 10)
+        .map((m, i) => `${i + 1}. 题面="${m.prompt}" 参考="${m.correctAnswer}" 用户答="${m.userAnswer}"${m.suggestion ? ` 反馈="${m.suggestion}"` : ''}`)
+        .join('\n')}`
+    : '';
+
   const prompt = `场景：${SCENARIO_LABELS[opts.scenario]}（${opts.scenario}）
 请生成 ${opts.count} 条题目。
 
 **JSON 输出契约**：最外层是 \`{ "items": [...] }\`，items 是题目数组，每条题目按 schema 字段填写。**严禁**用 "questions" 等其他键名。
 
-题型分布建议：${dist}。${fpHint}`;
+题型分布建议：${dist}。${mistakeHint}${fpHint}`;
 
   const res = await agent.generate(prompt, {
     structuredOutput: { schema: GenerationResultSchema },

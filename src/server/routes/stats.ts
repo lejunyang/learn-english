@@ -1,13 +1,22 @@
 import { Hono } from 'hono';
 import { promises as fs } from 'node:fs';
-import { readAllItems, readSchedule, SESSIONS_DIR } from '../../domain/store.js';
+import {
+  readAllItems,
+  readSchedule,
+  readAllMistakes,
+  SESSIONS_DIR,
+} from '../../domain/store.js';
 import path from 'node:path';
 import { isDue } from '../../domain/fsrs.js';
 
 export const statsRoutes = new Hono();
 
 statsRoutes.get('/overview', async (c) => {
-  const [items, schedule] = await Promise.all([readAllItems(), readSchedule()]);
+  const [items, schedule, mistakes] = await Promise.all([
+    readAllItems(),
+    readSchedule(),
+    readAllMistakes(),
+  ]);
   const now = new Date();
   const due = items.filter((it) => {
     const s = schedule[it.id];
@@ -29,13 +38,26 @@ statsRoutes.get('/overview', async (c) => {
     sessionsCount = 0;
   }
 
+  const openMistakes = mistakes.filter((m) => !m.resolved).length;
+
   return c.json({
     totalItems: items.length,
     due,
     byScenario,
     byType,
     sessionDays: sessionsCount,
+    mistakes: { total: mistakes.length, open: openMistakes },
   });
+});
+
+statsRoutes.get('/mistakes', async (c) => {
+  const limit = Math.min(parseInt(c.req.query('limit') ?? '50'), 200);
+  const onlyOpen = c.req.query('open') !== 'false';
+  const all = await readAllMistakes();
+  const list = (onlyOpen ? all.filter((m) => !m.resolved) : all)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .slice(0, limit);
+  return c.json({ mistakes: list });
 });
 
 statsRoutes.get('/recent-sessions', async (c) => {

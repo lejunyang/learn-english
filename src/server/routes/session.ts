@@ -5,7 +5,13 @@ import { runReviewPick } from '../../mastra/workflows/reviewPick.js';
 import { gradeTranslation } from '../../mastra/agents/translationGrader.js';
 import { streamCoachExplanation } from '../../mastra/agents/learningCoach.js';
 import { applyReview, type ReviewScore } from '../../domain/fsrs.js';
-import { readSchedule, upsertScheduleEntry, updateItem } from '../../domain/store.js';
+import {
+  readSchedule,
+  upsertScheduleEntry,
+  updateItem,
+  appendMistake,
+  resolveMistakesForItem,
+} from '../../domain/store.js';
 import {
   createSession,
   getSession,
@@ -125,6 +131,26 @@ sessionRoutes.post('/:id/grade', async (c) => {
 
   await applyAndPersist(parsed.data.itemId, parsed.data.score as ReviewScore, item);
 
+  // 各类题型答错记错题（translate 已在单独路由处理）
+  if (parsed.data.score <= 1 && item.type !== 'translate') {
+    const promptText = item.prompt.en ?? item.prompt.cn ?? item.prompt.cloze ?? '';
+    const answerText = item.answer.en ?? item.answer.cn ?? '';
+    await appendMistake({
+      id: ulid(),
+      itemId: parsed.data.itemId,
+      type: item.type,
+      scenario: item.scenario,
+      prompt: promptText,
+      correctAnswer: answerText,
+      userAnswer: parsed.data.userAnswer,
+      score: parsed.data.score,
+      occurredAt: new Date().toISOString(),
+      resolved: false,
+    });
+  } else if (parsed.data.score >= 2) {
+    await resolveMistakesForItem(parsed.data.itemId);
+  }
+
   const durationMs = Date.now() - act.questionStartedAtMs;
   recordAttempt(id, {
     itemId: parsed.data.itemId,
@@ -176,6 +202,25 @@ sessionRoutes.post('/:id/grade-translation', async (c) => {
   });
 
   await applyAndPersist(parsed.data.itemId, grade.score as ReviewScore, item, grade.feedback);
+
+  // 低分写错题本（score <= 1 视为错）
+  if (grade.score <= 1) {
+    await appendMistake({
+      id: ulid(),
+      itemId: parsed.data.itemId,
+      type: 'translate',
+      scenario: item.scenario,
+      prompt: item.prompt.cn,
+      correctAnswer: item.answer.en,
+      userAnswer: parsed.data.userAnswer,
+      suggestion: grade.feedback,
+      score: grade.score,
+      occurredAt: new Date().toISOString(),
+      resolved: false,
+    });
+  } else {
+    await resolveMistakesForItem(parsed.data.itemId);
+  }
 
   const durationMs = Date.now() - act.questionStartedAtMs;
   recordAttempt(id, {

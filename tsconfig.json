@@ -12,11 +12,7 @@
     "allowImportingTsExtensions": false,
     "verbatimModuleSyntax": false,
     "jsx": "react-jsx",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@shared/*": ["src/shared/*"]
-    },
+    "types": ["node"],
     "noEmit": true
   },
   "include": ["src/**/*", "web/src/**/*"]

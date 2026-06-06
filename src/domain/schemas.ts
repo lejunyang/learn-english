@@ -182,3 +182,23 @@ export const TranslationGradeSchema = z
   })
   .passthrough();
 export type TranslationGrade = z.infer<typeof TranslationGradeSchema>;
+
+// ============================================================
+// 错题本（mistakes）—— 翻译题低分自动追加
+// ============================================================
+export const MistakeSchema = z
+  .object({
+    id: z.string(), // ulid
+    itemId: z.string(),
+    type: z.enum(ITEM_TYPES),
+    scenario: z.enum(SCENARIOS).optional(),
+    prompt: z.string(), // 题面文本（cn / en / cloze 任一）
+    correctAnswer: z.string(), // 参考答案
+    userAnswer: z.string(),
+    suggestion: z.string().optional(), // AI 反馈
+    score: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    occurredAt: z.string(), // ISO
+    resolved: z.boolean().default(false), // 后续连续答对 2 次后置 true
+  })
+  .strict();
+export type Mistake = z.infer<typeof MistakeSchema>;

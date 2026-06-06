@@ -1,7 +1,13 @@
 import { ulid } from 'ulid';
 import { generateItems } from '../agents/contentGenerator.js';
 import { existingFingerprints, dedupeGenerated } from '../tools/dedup.js';
-import { appendItems, upsertScheduleEntry, upsertIndexEntry, fingerprintOf } from '../../domain/store.js';
+import {
+  appendItems,
+  upsertScheduleEntry,
+  upsertIndexEntry,
+  fingerprintOf,
+  readRecentMistakes,
+} from '../../domain/store.js';
 import { newEntry } from '../../domain/fsrs.js';
 import { ItemSchema, type Item, type Scenario } from '../../domain/schemas.js';
 
@@ -28,10 +34,23 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
   const fps = await existingFingerprints();
   const fpList = Array.from(fps);
 
+  // 取该场景下用户最近常错的表达，让生成器针对性出题
+  const allRecent = await readRecentMistakes({ days: 30, limit: 50 });
+  const recentMistakes = allRecent
+    .filter((m) => !m.scenario || m.scenario === input.scenario)
+    .slice(0, 10)
+    .map((m) => ({
+      prompt: m.prompt,
+      correctAnswer: m.correctAnswer,
+      userAnswer: m.userAnswer,
+      suggestion: m.suggestion,
+    }));
+
   const { items: generated, model } = await generateItems({
     scenario: input.scenario,
     count,
     existingFingerprints: fpList,
+    recentMistakes,
   });
 
   const deduped = dedupeGenerated(generated, fps);
