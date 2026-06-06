@@ -147,6 +147,9 @@ export const SessionSchema = z
   .strict();
 export type Session = z.infer<typeof SessionSchema>;
 
+// 草稿：允许额外字段（如 __learnDraft 存 queueIds/cursor 用于重启恢复）
+export const DraftSessionSchema = SessionSchema.passthrough();
+
 // ============================================================
 // Index (派生)
 // ============================================================
@@ -172,12 +175,10 @@ export type IndexMap = z.infer<typeof IndexMapSchema>;
 export const TranslationGradeSchema = z
   .object({
     score: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
-    breakdown: z.object({
-      semantic: z.number().int().min(0).max(2),
-      grammar: z.number().int().min(0).max(2),
-      naturalness: z.number().int().min(0).max(2),
-    }),
+    semantic: z.number().int().min(0).max(2),
+    grammar: z.number().int().min(0).max(2),
+    naturalness: z.number().int().min(0).max(2),
     feedback: z.string(),
   })
-  .strict();
+  .passthrough();
 export type TranslationGrade = z.infer<typeof TranslationGradeSchema>;

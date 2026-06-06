@@ -326,7 +326,7 @@ function Feedback({
         <div>
           <div className="font-medium">评分：{grade.score} / 3</div>
           <div className="text-xs text-slate-500">
-            语义 {grade.breakdown.semantic} · 语法 {grade.breakdown.grammar} · 地道 {grade.breakdown.naturalness}
+            语义 {grade.semantic} · 语法 {grade.grammar} · 地道 {grade.naturalness}
           </div>
           <div className="mt-2 text-sm">{grade.feedback}</div>
           {answerEn && (

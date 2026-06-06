@@ -32,7 +32,9 @@ export interface GradeResponse {
 
 export interface TranslationGrade {
   score: 0 | 1 | 2 | 3;
-  breakdown: { semantic: number; grammar: number; naturalness: number };
+  semantic: number;
+  grammar: number;
+  naturalness: number;
   feedback: string;
 }
 

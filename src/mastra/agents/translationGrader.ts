@@ -18,7 +18,7 @@ const SYSTEM = `你是一个严格但友好的英语翻译评分员。
 
 feedback：中文，2-4 句。先说对在哪、再说错在哪、给一句更优表达（如果用户写得比参考还好就直接表扬）。
 
-严格按 schema 输出，不要多余文字。`;
+**JSON 输出契约**：最外层直接是 \`{ "score": ..., "semantic": ..., "grammar": ..., "naturalness": ..., "feedback": "..." }\`，**不要**把三个维度嵌套进 breakdown 字段。`;
 
 const agent = new Agent({
   id: 'translationGrader',
