@@ -13,6 +13,7 @@
     "start": "node dist/server/index.js",
     "kill": "node scripts/kill-ports.mjs",
     "ingest:ecdict": "tsx scripts/ingest-ecdict.ts",
+    "ingest:scenario": "tsx scripts/ingest-scenario.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
