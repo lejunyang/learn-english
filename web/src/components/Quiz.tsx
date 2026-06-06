@@ -1,44 +1,51 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import type { Item, TranslationGrade } from '../api';
 import { api } from '../api';
+import {
+  currentItemAtom,
+  indexAtom,
+  totalAtom,
+  phaseAtom,
+  userAnswerAtom,
+  pickedAtom,
+  showOptionsAtom,
+  hintsShownAtom,
+  gradeAtom,
+  coachAtom,
+  submittingAtom,
+  pendingNextAtom,
+  sessionIdAtom,
+  resetItemStateAtom,
+  sessionDoneAtom,
+  summaryAtom,
+} from '../state/atoms';
 import { Phonetics, WordWithAudio, isWordOrPhrase } from './Phonetics';
 import { speak } from '../speech';
 
-interface Props {
-  sessionId: string;
-  item: Item;
-  index: number;
-  total: number;
-  onNext: (next: Item | null) => void;
-}
-
-type Phase = 'answering' | 'feedback';
-
-export function Quiz({ sessionId, item, index, total, onNext }: Props) {
-  const [phase, setPhase] = useState<Phase>('answering');
-  const [userAnswer, setUserAnswer] = useState('');
-  const [picked, setPicked] = useState<string | null>(null);
-  const [showOptions, setShowOptions] = useState(false);
-  const [hintShown, setHintShown] = useState<{ level: 'weak' | 'strong'; text: string }[]>([]);
-  const [grade, setGrade] = useState<TranslationGrade | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [coach, setCoach] = useState('');
+export function Quiz() {
+  const sid = useAtomValue(sessionIdAtom);
+  const item = useAtomValue(currentItemAtom);
+  const index = useAtomValue(indexAtom);
+  const total = useAtomValue(totalAtom);
+  const setCurrentItem = useSetAtom(currentItemAtom);
+  const setIndex = useSetAtom(indexAtom);
+  const [phase, setPhase] = useAtom(phaseAtom);
+  const [userAnswer, setUserAnswer] = useAtom(userAnswerAtom);
+  const [picked, setPicked] = useAtom(pickedAtom);
+  const [showOptions, setShowOptions] = useAtom(showOptionsAtom);
+  const [hintsShown, setHintsShown] = useAtom(hintsShownAtom);
+  const [grade, setGrade] = useAtom(gradeAtom);
+  const [coach, setCoach] = useAtom(coachAtom);
+  const [submitting, setSubmitting] = useAtom(submittingAtom);
+  const [pendingNext, setPendingNext] = useAtom(pendingNextAtom);
+  const resetItem = useSetAtom(resetItemStateAtom);
+  const setSessionDone = useSetAtom(sessionDoneAtom);
+  const setSummary = useSetAtom(summaryAtom);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 切题时复位
-  useEffect(() => {
-    setPhase('answering');
-    setUserAnswer('');
-    setPicked(null);
-    setShowOptions(false);
-    setHintShown([]);
-    setGrade(null);
-    setCoach('');
-  }, [item.id]);
-
-  // 选项（en2cn/cn2en/cloze）—— 随机插入正确答案
   const options = useMemo(() => {
-    if (item.type === 'translate') return null;
+    if (!item || item.type === 'translate') return null;
     const correct =
       item.type === 'en2cn' ? item.answer?.cn ?? '' :
       item.type === 'cn2en' ? item.answer?.en ?? '' :
@@ -47,15 +54,18 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
     return shuffleWithSeed(all, item.id);
   }, [item]);
 
+  if (!item) return null;
+
+  const isTextInputType = item.type !== 'translate';
+
   async function requestHint(level: 'weak' | 'strong') {
-    if (hintShown.some((h) => h.level === level)) return;
-    const r = await api.hint(sessionId, level);
-    setHintShown((h) => [...h, { level, text: r.hint }]);
+    if (hintsShown.some((h) => h.level === level)) return;
+    const r = await api.hint(sid, level);
+    setHintsShown((h) => [...h, { level, text: r.hint }]);
   }
 
-  // 统一评分入口：来自输入框或选项
   async function gradeAnswer(answer: string) {
-    if (phase !== 'answering' || submitting) return;
+    if (!item || phase !== 'answering' || submitting) return;
     setPicked(answer);
     setSubmitting(true);
 
@@ -63,59 +73,58 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
       item.type === 'en2cn' ? item.answer?.cn :
       item.type === 'cn2en' ? item.answer?.en :
       item.answer?.en;
-
     const isRight = normalize(answer) === normalize(correct ?? '');
-    const usedHint = hintShown.length > 0;
+    const usedHint = hintsShown.length > 0;
     const score: 0 | 1 | 2 | 3 = isRight ? (usedHint ? 1 : 2) : 0;
 
     try {
-      const r = await api.grade(sessionId, { itemId: item.id, userAnswer: answer, score });
+      const r = await api.grade(sid, { itemId: item.id, userAnswer: answer, score });
       setPhase('feedback');
-      if (!isRight) startCoach(answer);
-      pendingNext = r.next;
+      if (!isRight) startCoach(item.id, answer);
+      setPendingNext(r.next);
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function submitInput() {
+  function submitInput() {
     if (!userAnswer.trim()) return;
-    await gradeAnswer(userAnswer.trim());
+    void gradeAnswer(userAnswer.trim());
   }
 
   function submitChoice(choice: string) {
     void gradeAnswer(choice);
   }
 
-  function handleInputKeyDown(e: React.KeyboardEvent) {
+  function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      void submitInput();
+      submitInput();
     }
   }
 
   async function submitTranslation() {
-    if (phase !== 'answering' || submitting) return;
+    if (!item || phase !== 'answering' || submitting) return;
     if (!userAnswer.trim()) return;
     setSubmitting(true);
     try {
-      const r = await api.gradeTranslation(sessionId, {
+      const r = await api.gradeTranslation(sid, {
         itemId: item.id,
         userAnswer: userAnswer.trim(),
       });
       setGrade(r.grade ?? null);
       setPhase('feedback');
-      if ((r.grade?.score ?? 0) <= 1) startCoach(userAnswer.trim());
-      pendingNext = r.next;
+      if ((r.grade?.score ?? 0) <= 1) startCoach(item.id, userAnswer.trim());
+      setPendingNext(r.next);
     } finally {
       setSubmitting(false);
     }
   }
 
-  function startCoach(userAns: string) {
+  function startCoach(itemId: string, userAns: string) {
     api.coach(
-      sessionId,
-      item.id,
+      sid,
+      itemId,
       userAns,
       (delta) => setCoach((c) => c + delta),
       () => {},
@@ -123,19 +132,24 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
     );
   }
 
-  function goNext() {
-    onNext(pendingNext);
-    pendingNext = null;
+  async function goNext() {
+    if (pendingNext) {
+      setCurrentItem(pendingNext);
+      setIndex(index + 1);
+      setPendingNext(null);
+      resetItem();
+    } else {
+      try {
+        const r = await api.finish(sid);
+        setSummary(r.summary);
+      } finally {
+        setSessionDone(true);
+      }
+    }
   }
 
-  const isTextInputType = item.type !== 'translate';
-  const promptText = item.type === 'en2cn' ? item.prompt.en :
-    item.type === 'cn2en' ? item.prompt.cn :
-    item.type === 'translate' ? item.prompt.cn :
-    item.prompt.cloze ?? '';
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       <div className="text-xs text-slate-500 flex justify-between">
         <span>{index + 1} / {total}</span>
         <span>{item.scenario} · {item.type} · 难度 {item.difficulty}</span>
@@ -143,44 +157,43 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
 
       <PromptDisplay item={item} />
 
-      {/* 输入区域 —— 所有题型都优先显示输入框 */}
       {phase === 'answering' && (
         <div className="space-y-3">
-          {/* 非翻译题：输入框 + 提交按钮 */}
           {isTextInputType && (
             <div className="flex gap-2">
               <input
                 ref={inputRef}
                 type="text"
+                inputMode="text"
+                autoCapitalize="none"
+                autoCorrect="off"
                 value={userAnswer}
                 onChange={(e) => setUserAnswer(e.target.value)}
-                onKeyDown={handleInputKeyDown}
+                onKeyDown={handleKeyDown}
                 disabled={submitting}
                 placeholder="输入答案…"
-                className="flex-1 border rounded-lg px-4 py-3 text-lg disabled:bg-slate-50"
+                className="flex-1 border rounded-lg px-4 py-3 text-base sm:text-lg disabled:bg-slate-50 min-h-12"
                 autoFocus
               />
               <button
                 onClick={submitInput}
                 disabled={submitting || !userAnswer.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg font-medium disabled:opacity-50 shrink-0"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg font-medium disabled:opacity-50 shrink-0 min-h-12"
               >
                 提交
               </button>
             </div>
           )}
 
-          {/* 展示选项按钮（非翻译题，点击后露出选项） */}
           {isTextInputType && !showOptions && (
             <button
               onClick={() => setShowOptions(true)}
-              className="w-full text-sm border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 py-2.5 rounded-lg transition"
+              className="w-full text-sm border border-dashed border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 py-3 rounded-lg transition min-h-10"
             >
               + 展示选项
             </button>
           )}
 
-          {/* 选项列表（展示后可见） */}
           {isTextInputType && showOptions && options && (
             <ChoiceList
               options={options}
@@ -191,47 +204,45 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
             />
           )}
 
-          {/* 翻译题：Textarea */}
           {item.type === 'translate' && (
             <div className="space-y-2">
               <textarea
                 value={userAnswer}
                 onChange={(e) => setUserAnswer(e.target.value)}
                 disabled={submitting}
-                rows={3}
+                rows={4}
                 placeholder="输入英文翻译…"
-                className="w-full border rounded-lg p-3 text-lg disabled:bg-slate-50"
+                className="w-full border rounded-lg p-3 text-base disabled:bg-slate-50 min-h-[5rem]"
               />
               <button
                 onClick={submitTranslation}
                 disabled={submitting || !userAnswer.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg font-medium disabled:opacity-50 min-h-12"
               >
                 {submitting ? '评分中…' : '提交'}
               </button>
             </div>
           )}
 
-          {/* 提示按钮 */}
           <div className="flex gap-2">
             <button
               onClick={() => requestHint('weak')}
-              className="text-xs px-3 py-1.5 rounded border text-slate-600 hover:bg-slate-100"
+              className="text-xs px-3 py-2 rounded border text-slate-600 hover:bg-slate-100 min-h-9"
             >
               提示（弱）
             </button>
             <button
               onClick={() => requestHint('strong')}
-              className="text-xs px-3 py-1.5 rounded border text-slate-600 hover:bg-slate-100"
+              className="text-xs px-3 py-2 rounded border text-slate-600 hover:bg-slate-100 min-h-9"
             >
               提示（强）
             </button>
           </div>
 
-          {hintShown.length > 0 && (
+          {hintsShown.length > 0 && (
             <div className="space-y-1">
-              {hintShown.map((h) => (
-                <div key={h.level} className="text-sm text-amber-700 bg-amber-50 border-l-4 border-amber-300 px-3 py-2">
+              {hintsShown.map((h) => (
+                <div key={h.level} className="text-sm text-amber-700 bg-amber-50 border-l-4 border-amber-300 px-3 py-2.5">
                   <span className="text-xs text-amber-500 mr-2">[{h.level === 'weak' ? '弱' : '强'}]</span>
                   {h.text}
                 </div>
@@ -241,7 +252,6 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
         </div>
       )}
 
-      {/* 反馈 */}
       {phase === 'feedback' && (
         <Feedback
           item={item}
@@ -250,14 +260,12 @@ export function Quiz({ sessionId, item, index, total, onNext }: Props) {
           grade={grade}
           coach={coach}
           onNext={goNext}
+          nextLabel={pendingNext ? '下一题 →' : '完成学习'}
         />
       )}
     </div>
   );
 }
-
-// 暂存
-let pendingNext: Item | null = null;
 
 function correctOf(it: Item): string {
   return (
@@ -287,8 +295,8 @@ function PromptDisplay({ item }: { item: Item }) {
   if (item.type === 'en2cn') {
     const text = item.prompt.en ?? '';
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-        <div className="text-3xl font-medium">
+      <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
+        <div className="text-2xl sm:text-3xl font-medium break-words">
           <button onClick={() => speak(text)} className="hover:text-blue-600">{text} 🔊</button>
         </div>
         {item.phonetics?.ipa && isWordOrPhrase(text) && (
@@ -300,23 +308,23 @@ function PromptDisplay({ item }: { item: Item }) {
   }
   if (item.type === 'cn2en') {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-        <div className="text-2xl font-medium">{item.prompt.cn}</div>
+      <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
+        <div className="text-xl sm:text-2xl font-medium break-words">{item.prompt.cn}</div>
         <div className="text-sm text-slate-500 mt-3">输入对应的英文</div>
       </div>
     );
   }
   if (item.type === 'translate') {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <div className="text-xl font-medium">{item.prompt.cn}</div>
+      <div className="bg-white rounded-lg shadow-sm p-5">
+        <div className="text-lg sm:text-xl font-medium break-words">{item.prompt.cn}</div>
         <div className="text-sm text-slate-500 mt-2">请输入英文翻译</div>
       </div>
     );
   }
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-      <div className="text-xl font-medium">{item.prompt.cloze}</div>
+    <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
+      <div className="text-lg sm:text-xl font-medium break-words">{item.prompt.cloze}</div>
       <div className="text-sm text-slate-500 mt-3">输入填空词</div>
     </div>
   );
@@ -326,7 +334,7 @@ function ChoiceList({
   options, picked, correct, phase, onPick,
 }: {
   options: string[]; picked: string | null; correct: string;
-  phase: Phase; onPick: (s: string) => void;
+  phase: 'answering' | 'feedback'; onPick: (s: string) => void;
 }) {
   if (phase === 'feedback') {
     return (
@@ -356,7 +364,7 @@ function ChoiceList({
           <button
             key={opt}
             onClick={() => onPick(opt)}
-            className="text-left px-4 py-3 rounded border bg-white border-slate-200 hover:bg-slate-50 transition"
+            className="text-left px-4 py-3.5 rounded border bg-white border-slate-200 hover:bg-slate-50 transition min-h-11"
           >
             {opt}
           </button>
@@ -367,10 +375,11 @@ function ChoiceList({
 }
 
 function Feedback({
-  item, picked, userAnswer, grade, coach, onNext,
+  item, picked, userAnswer, grade, coach, onNext, nextLabel,
 }: {
   item: Item; picked: string | null; userAnswer: string;
-  grade: TranslationGrade | null; coach: string; onNext: () => void;
+  grade: TranslationGrade | null; coach: string;
+  onNext: () => void; nextLabel: string;
 }) {
   const answerEn = item.answer?.en;
   const answerCn = item.answer?.cn;
@@ -410,30 +419,23 @@ function Feedback({
               <WordWithAudio text={answerEn ?? ''} ipa={item.phonetics?.ipa} />}
           </div>
           {picked && (
-            <div className="text-slate-500 mt-1">
-              {showable(picked)}
-            </div>
+            <div className="text-slate-500 mt-1">你的回答：{picked}</div>
           )}
         </div>
       )}
 
       {coach && (
-        <div className="text-sm text-slate-700 bg-white border-l-4 border-blue-300 px-3 py-2 whitespace-pre-wrap">
+        <div className="text-sm text-slate-700 bg-white border-l-4 border-blue-300 px-3 py-2.5 whitespace-pre-wrap">
           {coach}
         </div>
       )}
 
       <button
         onClick={onNext}
-        className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded"
+        className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-lg font-medium min-h-12"
       >
-        下一题 →
+        {nextLabel}
       </button>
     </div>
   );
-}
-
-function showable(s: string) {
-  if (s.startsWith('你的输入：') || s.startsWith('你的选择：')) return s;
-  return `你的回答：${s}`;
 }

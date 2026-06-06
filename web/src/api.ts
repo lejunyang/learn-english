@@ -102,6 +102,7 @@ export const api = {
     byScenario: Record<string, number>;
     byType: Record<string, number>;
     sessionDays: number;
+    mistakes?: { total: number; open: number };
   }>('/api/stats/overview'),
 
   // Coach SSE
