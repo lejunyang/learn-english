@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.vite/
+web/dist/
+
+# 保留 data 目录，但忽略草稿与临时文件
+data/drafts/
+data/*.tmp

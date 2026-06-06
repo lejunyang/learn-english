@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "noEmit": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["src/server/**/*", "src/mastra/**/*", "src/domain/**/*", "src/shared/**/*"]
+}
