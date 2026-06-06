@@ -1,0 +1,179 @@
+import { z } from 'zod';
+
+// ============================================================
+// 受控词表 —— 见 src/domain/tags.ts
+// ============================================================
+export const SCENARIOS = ['workplace', 'computing', 'ai', 'travel', 'daily', 'food'] as const;
+export type Scenario = (typeof SCENARIOS)[number];
+
+export const ITEM_TYPES = ['en2cn', 'cn2en', 'translate', 'cloze'] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+// ============================================================
+// Item
+// ============================================================
+export const PhoneticsSchema = z
+  .object({
+    ipa: z.string().optional(),
+    ipaUS: z.string().optional(),
+    ipaUK: z.string().optional(),
+  })
+  .strict();
+
+export const PromptSchema = z
+  .object({
+    en: z.string().optional(),
+    cn: z.string().optional(),
+    cloze: z.string().optional(), // 含 ___ 占位
+  })
+  .strict();
+
+export const AnswerSchema = z
+  .object({
+    en: z.string().optional(),
+    cn: z.string().optional(),
+  })
+  .strict();
+
+export const HintsSchema = z
+  .object({
+    weak: z.string(), // 类别/首字母/词性
+    strong: z.string(), // 接近答案
+  })
+  .strict();
+
+export const ItemStatsSchema = z
+  .object({
+    attempts: z.number().int().nonnegative().default(0),
+    correct: z.number().int().nonnegative().default(0),
+    lastScore: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  })
+  .strict();
+
+export const ItemSourceSchema = z
+  .object({
+    sessionId: z.string(),
+    createdAt: z.string(), // ISO
+    model: z.string(),
+  })
+  .strict();
+
+export const ItemSchema = z
+  .object({
+    id: z.string(), // ulid
+    type: z.enum(ITEM_TYPES),
+    scenario: z.enum(SCENARIOS),
+    langTags: z.array(z.string()).default([]),
+    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+
+    prompt: PromptSchema,
+    answer: AnswerSchema,
+    distractors: z.array(z.string()).optional(),
+    hints: HintsSchema,
+    phonetics: PhoneticsSchema.optional(),
+
+    related: z.array(z.string()).default([]),
+    source: ItemSourceSchema,
+    stats: ItemStatsSchema.default({ attempts: 0, correct: 0 }),
+  })
+  .strict();
+
+export type Item = z.infer<typeof ItemSchema>;
+
+// AI 生成时的精简 schema —— 不含 id/source/stats/related，由后端填充
+export const GeneratedItemSchema = ItemSchema.omit({
+  id: true,
+  source: true,
+  stats: true,
+  related: true,
+}).strict();
+export type GeneratedItem = z.infer<typeof GeneratedItemSchema>;
+
+// ============================================================
+// Schedule (FSRS)
+// ============================================================
+export const ScheduleEntrySchema = z
+  .object({
+    stability: z.number(),
+    difficulty: z.number(),
+    due: z.string(), // ISO
+    reps: z.number().int().nonnegative(),
+    lapses: z.number().int().nonnegative(),
+    lastReview: z.string().optional(), // ISO
+    state: z.number().int(), // ts-fsrs State enum (0=New,1=Learning,2=Review,3=Relearning)
+  })
+  .strict();
+export type ScheduleEntry = z.infer<typeof ScheduleEntrySchema>;
+
+export const ScheduleMapSchema = z.record(z.string(), ScheduleEntrySchema);
+export type ScheduleMap = z.infer<typeof ScheduleMapSchema>;
+
+// ============================================================
+// Session
+// ============================================================
+export const HintLevelSchema = z.enum(['none', 'weak', 'strong']);
+export type HintLevel = z.infer<typeof HintLevelSchema>;
+
+export const AttemptSchema = z
+  .object({
+    itemId: z.string(),
+    type: z.enum(ITEM_TYPES),
+    userAnswer: z.string(),
+    score: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    usedHint: HintLevelSchema,
+    durationMs: z.number().int().nonnegative(),
+    feedback: z.string().optional(),
+  })
+  .strict();
+export type Attempt = z.infer<typeof AttemptSchema>;
+
+export const SessionModeSchema = z.enum(['new', 'review']);
+export type SessionMode = z.infer<typeof SessionModeSchema>;
+
+export const SessionSchema = z
+  .object({
+    id: z.string(),
+    startedAt: z.string(),
+    finishedAt: z.string().optional(),
+    mode: SessionModeSchema,
+    scenario: z.enum(SCENARIOS).optional(),
+    plannedMinutes: z.number().int().positive(),
+    attempts: z.array(AttemptSchema).default([]),
+  })
+  .strict();
+export type Session = z.infer<typeof SessionSchema>;
+
+// ============================================================
+// Index (派生)
+// ============================================================
+export const IndexEntrySchema = z
+  .object({
+    type: z.enum(ITEM_TYPES),
+    scenario: z.enum(SCENARIOS),
+    langTags: z.array(z.string()),
+    due: z.string().optional(),
+    lastScore: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    attempts: z.number().int().nonnegative(),
+    fingerprint: z.string(), // 用于去重
+  })
+  .strict();
+export type IndexEntry = z.infer<typeof IndexEntrySchema>;
+
+export const IndexMapSchema = z.record(z.string(), IndexEntrySchema);
+export type IndexMap = z.infer<typeof IndexMapSchema>;
+
+// ============================================================
+// 评分细分（翻译题）
+// ============================================================
+export const TranslationGradeSchema = z
+  .object({
+    score: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    breakdown: z.object({
+      semantic: z.number().int().min(0).max(2),
+      grammar: z.number().int().min(0).max(2),
+      naturalness: z.number().int().min(0).max(2),
+    }),
+    feedback: z.string(),
+  })
+  .strict();
+export type TranslationGrade = z.infer<typeof TranslationGradeSchema>;

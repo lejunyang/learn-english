@@ -1,0 +1,232 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  ItemSchema,
+  ScheduleMapSchema,
+  IndexMapSchema,
+  SessionSchema,
+  type Item,
+  type ScheduleMap,
+  type ScheduleEntry,
+  type IndexMap,
+  type IndexEntry,
+  type Session,
+} from './schemas.js';
+
+// ============================================================
+// 路径解析
+// ============================================================
+// 允许通过 LEARN_DATA_DIR 覆盖，默认在仓库根 data/
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+export const DATA_DIR = process.env.LEARN_DATA_DIR
+  ? path.resolve(process.env.LEARN_DATA_DIR)
+  : path.join(REPO_ROOT, 'data');
+
+export const ITEMS_FILE = path.join(DATA_DIR, 'items.jsonl');
+export const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
+export const INDEX_FILE = path.join(DATA_DIR, 'index.json');
+export const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+export const DRAFTS_DIR = path.join(DATA_DIR, 'drafts');
+
+async function ensureDirs(): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  await fs.mkdir(DRAFTS_DIR, { recursive: true });
+}
+
+// ============================================================
+// 原子写入（先写 .tmp，再 rename），diff 友好
+// ============================================================
+async function atomicWriteText(file: string, content: string): Promise<void> {
+  await ensureDirs();
+  const tmp = `${file}.tmp`;
+  await fs.writeFile(tmp, content, 'utf8');
+  await fs.rename(tmp, file);
+}
+
+// 字典序排序 JSON.stringify
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, sortReplacer, 2) + '\n';
+}
+
+function sortReplacer(_key: string, value: unknown): unknown {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    return Object.keys(obj)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, k) => {
+        acc[k] = obj[k];
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+async function readJsonIfExists<T>(file: string, fallback: T): Promise<T> {
+  try {
+    const text = await fs.readFile(file, 'utf8');
+    return JSON.parse(text) as T;
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return fallback;
+    throw e;
+  }
+}
+
+// ============================================================
+// Items (JSONL)
+// ============================================================
+
+export async function readAllItems(): Promise<Item[]> {
+  try {
+    const text = await fs.readFile(ITEMS_FILE, 'utf8');
+    return text
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((line, idx) => {
+        try {
+          return ItemSchema.parse(JSON.parse(line));
+        } catch (err) {
+          throw new Error(`Invalid item at line ${idx + 1}: ${(err as Error).message}`);
+        }
+      });
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+export async function appendItems(items: Item[]): Promise<void> {
+  if (items.length === 0) return;
+  await ensureDirs();
+  const text =
+    items
+      .map((it) => JSON.stringify(ItemSchema.parse(it)))
+      .join('\n') + '\n';
+  await fs.appendFile(ITEMS_FILE, text, 'utf8');
+}
+
+// 替换某条 item（整文件重写；item 数量到几千前性能可忽略）
+export async function updateItem(id: string, patch: Partial<Item>): Promise<Item | null> {
+  const all = await readAllItems();
+  const idx = all.findIndex((i) => i.id === id);
+  if (idx === -1) return null;
+  const merged = ItemSchema.parse({ ...all[idx], ...patch });
+  all[idx] = merged;
+  const text = all.map((it) => JSON.stringify(it)).join('\n') + '\n';
+  await atomicWriteText(ITEMS_FILE, text);
+  return merged;
+}
+
+// ============================================================
+// Schedule
+// ============================================================
+
+export async function readSchedule(): Promise<ScheduleMap> {
+  const raw = await readJsonIfExists<unknown>(SCHEDULE_FILE, {});
+  return ScheduleMapSchema.parse(raw);
+}
+
+export async function writeSchedule(map: ScheduleMap): Promise<void> {
+  ScheduleMapSchema.parse(map);
+  await atomicWriteText(SCHEDULE_FILE, stableStringify(map));
+}
+
+export async function upsertScheduleEntry(id: string, entry: ScheduleEntry): Promise<void> {
+  const map = await readSchedule();
+  map[id] = entry;
+  await writeSchedule(map);
+}
+
+// ============================================================
+// Index (派生)
+// ============================================================
+
+export async function readIndex(): Promise<IndexMap> {
+  const raw = await readJsonIfExists<unknown>(INDEX_FILE, {});
+  return IndexMapSchema.parse(raw);
+}
+
+export async function writeIndex(map: IndexMap): Promise<void> {
+  IndexMapSchema.parse(map);
+  await atomicWriteText(INDEX_FILE, stableStringify(map));
+}
+
+export async function upsertIndexEntry(id: string, entry: IndexEntry): Promise<void> {
+  const map = await readIndex();
+  map[id] = entry;
+  await writeIndex(map);
+}
+
+// 从 items + schedule 重建 index
+export async function rebuildIndex(): Promise<IndexMap> {
+  const [items, schedule] = await Promise.all([readAllItems(), readSchedule()]);
+  const map: IndexMap = {};
+  for (const it of items) {
+    const sched = schedule[it.id];
+    map[it.id] = {
+      type: it.type,
+      scenario: it.scenario,
+      langTags: it.langTags,
+      due: sched?.due,
+      lastScore: it.stats.lastScore,
+      attempts: it.stats.attempts,
+      fingerprint: fingerprintOf(it),
+    };
+  }
+  await writeIndex(map);
+  return map;
+}
+
+// 规范化指纹：用于去重
+export function fingerprintOf(it: Pick<Item, 'type' | 'prompt' | 'answer'>): string {
+  const key = [
+    it.type,
+    (it.prompt.en ?? it.prompt.cn ?? it.prompt.cloze ?? '').toLowerCase().replace(/[^a-z0-9一-鿿]+/g, ''),
+    (it.answer.en ?? it.answer.cn ?? '').toLowerCase().replace(/[^a-z0-9一-鿿]+/g, ''),
+  ].join('|');
+  return key;
+}
+
+// ============================================================
+// Sessions (按天 JSONL)
+// ============================================================
+
+function sessionFileFor(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return path.join(SESSIONS_DIR, `${y}-${m}-${d}.jsonl`);
+}
+
+export async function appendSession(session: Session): Promise<void> {
+  await ensureDirs();
+  const file = sessionFileFor(new Date(session.startedAt));
+  const line = JSON.stringify(SessionSchema.parse(session)) + '\n';
+  await fs.appendFile(file, line, 'utf8');
+}
+
+// 保存草稿（覆盖式，便于 resume）
+export async function saveDraftSession(session: Session): Promise<void> {
+  await ensureDirs();
+  const file = path.join(DRAFTS_DIR, `${session.id}.json`);
+  await atomicWriteText(file, stableStringify(SessionSchema.parse(session)));
+}
+
+export async function loadDraftSession(id: string): Promise<Session | null> {
+  const file = path.join(DRAFTS_DIR, `${id}.json`);
+  const raw = await readJsonIfExists<unknown | null>(file, null);
+  if (raw === null) return null;
+  return SessionSchema.parse(raw);
+}
+
+export async function deleteDraftSession(id: string): Promise<void> {
+  const file = path.join(DRAFTS_DIR, `${id}.json`);
+  try {
+    await fs.unlink(file);
+  } catch (e: any) {
+    if (e?.code !== 'ENOENT') throw e;
+  }
+}
