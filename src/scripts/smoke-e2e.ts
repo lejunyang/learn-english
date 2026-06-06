@@ -12,7 +12,7 @@ async function main() {
     sessionId: 'smoke-' + Date.now(),
   });
   console.log(`[e2e] workflow ok in ${Date.now() - t0}ms`);
-  console.log(`[e2e] requested=${res.requested} generated=${res.generated} duplicates=${res.duplicates} created=${res.created.length}`);
+  console.log(`[e2e] requested=${res.requested} localUsed=${res.localUsed} aiGenerated=${res.aiGenerated} aiDuplicates=${res.aiDuplicates} created=${res.created.length}`);
 
   const [items, schedule] = await Promise.all([readAllItems(), readSchedule()]);
   console.log(`[e2e] disk: items=${items.length} schedule=${Object.keys(schedule).length}`);

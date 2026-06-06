@@ -217,3 +217,63 @@ export const MistakeSchema = z
   })
   .strict();
 export type Mistake = z.infer<typeof MistakeSchema>;
+
+// ============================================================
+// Dictionary / Corpus —— 本地大语料库
+// ============================================================
+
+// 一个 sense（义项）
+export const DictSenseSchema = z
+  .object({
+    pos: z.string().optional(), // n. / v. / adj. ...
+    cn: z.array(z.string()).default([]), // 该 sense 的中文释义（可多个）
+    definition: z.string().optional(), // 英文释义
+    scenarios: z.array(z.enum(SCENARIOS)).default([]),
+    examples: z
+      .array(
+        z.object({
+          en: z.string(),
+          cn: z.string().optional(),
+        }),
+      )
+      .default([]),
+  })
+  .passthrough();
+export type DictSense = z.infer<typeof DictSenseSchema>;
+
+export const DictEntrySchema = z
+  .object({
+    lemma: z.string(), // 词根/单词
+    ipa: z
+      .object({
+        us: z.string().optional(),
+        uk: z.string().optional(),
+        any: z.string().optional(), // ECDICT 只给一个时塞这里
+      })
+      .optional(),
+    pos: z.array(z.string()).default([]),
+    cefr: z.string().optional(), // A1/A2/B1/B2/C1/C2 (Oxford 5000)
+    tags: z.array(z.string()).default([]), // cet4/cet6/ky/toefl/ielts/gre/zk/gk
+    frq: z.number().int().optional(), // COCA 频率排名 (越小越高频)
+    bnc: z.number().int().optional(),
+    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    senses: z.array(DictSenseSchema).default([]),
+    exchange: z.string().optional(), // ECDICT 词形变化原文
+    source: z.string(), // ecdict / oxford / ai-generated:xxx
+  })
+  .passthrough();
+export type DictEntry = z.infer<typeof DictEntrySchema>;
+
+export const CorpusEntrySchema = z
+  .object({
+    id: z.string(), // ulid
+    en: z.string(),
+    cn: z.string().optional(), // 中文翻译（可能没有）
+    keywords: z.array(z.string()).default([]), // 可挖空的关键词/短语
+    scenarios: z.array(z.enum(SCENARIOS)).default([]),
+    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    cefr: z.string().optional(),
+    source: z.string(),
+  })
+  .passthrough();
+export type CorpusEntry = z.infer<typeof CorpusEntrySchema>;

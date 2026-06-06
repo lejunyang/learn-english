@@ -25,6 +25,7 @@ export function Home() {
   const [defaultModel, setDefaultModel] = useState<string>('');
   const [model, setModel] = useState<string>('');
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium');
+  const [aiRatio, setAiRatio] = useState<number>(0); // 0 = 全本地，1 = 全 AI
   const [minutes, setMinutes] = useState<number>(10);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export function Home() {
         minutes,
         model: model || undefined,
         effort,
+        aiRatio,
       });
       if (res.error || !res.sessionId) {
         setErr(res.error ?? '没有可用题目');
@@ -191,6 +193,30 @@ export function Home() {
             ))}
           </div>
         </div>
+
+        {/* AI 占比 (仅新学习有意义) */}
+        {mode === 'new' && (
+          <div>
+            <div className="text-sm text-slate-600 mb-2 flex justify-between">
+              <span>AI 生成占比</span>
+              <span className="text-xs text-slate-400">
+                本地 {Math.round((1 - aiRatio) * 100)}% / AI {Math.round(aiRatio * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={Math.round(aiRatio * 100)}
+              onChange={(e) => setAiRatio(parseInt(e.target.value, 10) / 100)}
+              className="w-full"
+            />
+            <div className="text-xs text-slate-400 mt-1">
+              本地不足时会自动用 AI 补足
+            </div>
+          </div>
+        )}
 
         {/* 时长 */}
         <div>

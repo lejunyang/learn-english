@@ -8,6 +8,8 @@ import {
   SessionSchema,
   DraftSessionSchema,
   MistakeSchema,
+  DictEntrySchema,
+  CorpusEntrySchema,
   type Item,
   type ScheduleMap,
   type ScheduleEntry,
@@ -15,6 +17,9 @@ import {
   type IndexEntry,
   type Session,
   type Mistake,
+  type DictEntry,
+  type CorpusEntry,
+  type Scenario,
 } from './schemas.js';
 
 // ============================================================
@@ -32,6 +37,8 @@ export const ITEMS_FILE = path.join(DATA_DIR, 'items.jsonl');
 export const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 export const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 export const MISTAKES_FILE = path.join(DATA_DIR, 'mistakes.jsonl');
+export const DICT_FILE = path.join(DATA_DIR, 'dict.jsonl');
+export const CORPUS_FILE = path.join(DATA_DIR, 'corpus.jsonl');
 export const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 export const DRAFTS_DIR = path.join(DATA_DIR, 'drafts');
 
@@ -294,4 +301,113 @@ export async function resolveMistakesForItem(itemId: string): Promise<number> {
   const text = all.map((m) => JSON.stringify(m)).join('\n') + '\n';
   await atomicWriteText(MISTAKES_FILE, text);
   return changed;
+}
+
+// ============================================================
+// Dictionary (JSONL, lemma 唯一)
+// ============================================================
+
+export async function readAllDict(): Promise<DictEntry[]> {
+  try {
+    const text = await fs.readFile(DICT_FILE, 'utf8');
+    return text
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((line, idx) => {
+        try {
+          return DictEntrySchema.parse(JSON.parse(line));
+        } catch (err) {
+          throw new Error(`Invalid dict at line ${idx + 1}: ${(err as Error).message}`);
+        }
+      });
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+export async function appendDict(entries: DictEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  await ensureDirs();
+  const text = entries.map((e) => JSON.stringify(DictEntrySchema.parse(e))).join('\n') + '\n';
+  await fs.appendFile(DICT_FILE, text, 'utf8');
+}
+
+/**
+ * 内存索引：lemma 小写 → DictEntry。给出题 / dedup 用。
+ * 调用方应在请求开始时构建一次，session 内复用。
+ */
+export async function buildDictIndex(): Promise<Map<string, DictEntry>> {
+  const all = await readAllDict();
+  return new Map(all.map((e) => [e.lemma.toLowerCase(), e]));
+}
+
+/**
+ * 按场景 + 难度过滤 dict 条目（候选池）。
+ */
+export async function pickDictBy(opts: {
+  scenario?: Scenario;
+  difficulty?: number[]; // 允许的难度集合
+  limit?: number;
+}): Promise<DictEntry[]> {
+  const all = await readAllDict();
+  const limit = opts.limit ?? Infinity;
+  const out: DictEntry[] = [];
+  for (const e of all) {
+    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) continue;
+    if (opts.scenario) {
+      const hit = e.senses.some((s) => s.scenarios.includes(opts.scenario as Scenario));
+      if (!hit) continue;
+    }
+    out.push(e);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// ============================================================
+// Corpus (JSONL)
+// ============================================================
+
+export async function readAllCorpus(): Promise<CorpusEntry[]> {
+  try {
+    const text = await fs.readFile(CORPUS_FILE, 'utf8');
+    return text
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((line, idx) => {
+        try {
+          return CorpusEntrySchema.parse(JSON.parse(line));
+        } catch (err) {
+          throw new Error(`Invalid corpus at line ${idx + 1}: ${(err as Error).message}`);
+        }
+      });
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+export async function appendCorpus(entries: CorpusEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  await ensureDirs();
+  const text = entries.map((e) => JSON.stringify(CorpusEntrySchema.parse(e))).join('\n') + '\n';
+  await fs.appendFile(CORPUS_FILE, text, 'utf8');
+}
+
+export async function pickCorpusBy(opts: {
+  scenario?: Scenario;
+  difficulty?: number[];
+  limit?: number;
+}): Promise<CorpusEntry[]> {
+  const all = await readAllCorpus();
+  const limit = opts.limit ?? Infinity;
+  const out: CorpusEntry[] = [];
+  for (const e of all) {
+    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) continue;
+    if (opts.scenario && !e.scenarios.includes(opts.scenario)) continue;
+    out.push(e);
+    if (out.length >= limit) break;
+  }
+  return out;
 }

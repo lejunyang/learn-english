@@ -10,3 +10,5 @@ web/dist/
 # 保留 data 目录，但忽略草稿与临时文件
 data/drafts/
 data/*.tmp
+# 原始数据源 (大文件)，由 pnpm ingest 处理后产生 data/dict.jsonl / corpus.jsonl
+data/raw/

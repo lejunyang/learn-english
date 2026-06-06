@@ -61,6 +61,7 @@ export const api = {
     minutes: number;
     model?: string;
     effort?: 'low' | 'medium' | 'high';
+    aiRatio?: number;
   }) => postJSON<StartResponse>('/api/session/start', body),
 
   models: () =>

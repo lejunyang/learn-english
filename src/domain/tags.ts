@@ -95,3 +95,143 @@ export const SUGGESTED_LANG_TAGS = [
   'formal',
   'informal',
 ] as const;
+
+// ============================================================
+// 场景关键词表 —— 用于 ingest 时给词条/句子打场景标签（0 token）
+// 关键词命中即归类。一个 entry 可以同时属于多个场景。
+// 字典义项 sense 的中文释义 + 例句 + 句子原文都参与匹配。
+// ============================================================
+export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }> = {
+  // 工作
+  'biz-email': {
+    en: ['email', 'attach', 'cc', 'bcc', 'subject', 'regards', 'sincerely', 'inquiry', 'reply', 'forward', 'invoice', 'quotation', 'proposal'],
+    cn: ['邮件', '附件', '抄送', '回复', '转发', '询问', '报价', '提案'],
+  },
+  meeting: {
+    en: ['meeting', 'agenda', 'minutes', 'attend', 'present', 'discuss', 'conclusion', 'action item', 'schedule'],
+    cn: ['会议', '议程', '纪要', '出席', '讨论', '结论', '议题'],
+  },
+  interview: {
+    en: ['interview', 'candidate', 'resume', 'cv', 'experience', 'skill', 'offer', 'hire', 'recruit', 'salary expectation'],
+    cn: ['面试', '简历', '候选人', '应聘', '招聘', '录用', '期望薪资'],
+  },
+  negotiation: {
+    en: ['negotiate', 'bargain', 'concession', 'deal', 'agreement', 'compromise', 'counter-offer', 'discount'],
+    cn: ['谈判', '议价', '让步', '协议', '折中', '还价', '折扣'],
+  },
+  slack: {
+    en: ['slack', 'channel', 'dm', 'ping', 'thread', 'emoji', 'huddle'],
+    cn: ['即时', '消息', '群聊', '私聊'],
+  },
+  // 技术
+  coding: {
+    en: ['code', 'function', 'variable', 'class', 'method', 'bug', 'debug', 'commit', 'merge', 'pull request', 'review', 'refactor', 'syntax', 'compile'],
+    cn: ['代码', '函数', '变量', '类', '方法', '调试', '提交', '合并', '重构', '编译'],
+  },
+  'ai-ml': {
+    en: ['model', 'training', 'inference', 'neural', 'dataset', 'prompt', 'agent', 'embedding', 'token', 'fine-tune', 'gradient', 'loss'],
+    cn: ['模型', '训练', '推理', '神经', '数据集', '提示词', '微调', '梯度'],
+  },
+  devops: {
+    en: ['deploy', 'deployment', 'pipeline', 'ci', 'cd', 'rollback', 'kubernetes', 'docker', 'container', 'monitor', 'alert', 'incident', 'sla'],
+    cn: ['部署', '流水线', '回滚', '容器', '监控', '告警', '事故'],
+  },
+  data: {
+    en: ['sql', 'query', 'database', 'table', 'index', 'join', 'aggregate', 'pipeline', 'etl', 'dashboard', 'report', 'metric'],
+    cn: ['数据库', '查询', '表', '聚合', '指标', '报表'],
+  },
+  'system-design': {
+    en: ['architecture', 'scalability', 'load balancer', 'cache', 'queue', 'microservice', 'latency', 'throughput', 'consistency', 'partition'],
+    cn: ['架构', '扩展性', '负载均衡', '缓存', '队列', '微服务', '延迟', '吞吐'],
+  },
+  // 生活
+  shopping: {
+    en: ['buy', 'shop', 'store', 'price', 'sale', 'discount', 'refund', 'return', 'cashier', 'receipt', 'try on', 'size', 'fit'],
+    cn: ['购物', '买', '商店', '价格', '打折', '退款', '试穿', '尺码', '收银'],
+  },
+  dining: {
+    en: ['menu', 'order', 'waiter', 'waitress', 'reservation', 'bill', 'tip', 'spicy', 'allergic', 'vegetarian', 'takeout', 'delivery'],
+    cn: ['菜单', '点餐', '服务员', '预订', '账单', '小费', '辣', '过敏', '素食', '外卖'],
+  },
+  doctor: {
+    en: ['doctor', 'patient', 'symptom', 'pain', 'fever', 'cough', 'prescription', 'medicine', 'hospital', 'clinic', 'appointment', 'diagnosis'],
+    cn: ['医生', '病人', '症状', '疼痛', '发烧', '咳嗽', '处方', '药', '医院', '诊所', '挂号', '诊断'],
+  },
+  rent: {
+    en: ['rent', 'landlord', 'tenant', 'lease', 'deposit', 'apartment', 'utility', 'sublet', 'roommate'],
+    cn: ['租房', '房东', '租客', '租约', '押金', '公寓', '水电', '转租', '室友'],
+  },
+  transport: {
+    en: ['taxi', 'cab', 'uber', 'subway', 'bus', 'train', 'station', 'fare', 'ticket', 'transfer', 'route'],
+    cn: ['出租车', '打车', '地铁', '公交', '火车', '车站', '票价', '换乘', '路线'],
+  },
+  // 文化
+  movies: {
+    en: ['movie', 'film', 'cinema', 'scene', 'director', 'actor', 'actress', 'plot', 'subtitle'],
+    cn: ['电影', '影院', '导演', '演员', '剧情', '字幕', '台词'],
+  },
+  idioms: {
+    en: [], // idioms 难用关键词识别，靠 ECDICT 的 tag 或长度+常用词组合
+    cn: ['谚语', '俚语', '习语', '俗语'],
+  },
+  festivals: {
+    en: ['christmas', 'thanksgiving', 'halloween', 'easter', 'new year', 'festival', 'celebration', 'tradition'],
+    cn: ['节日', '春节', '圣诞', '感恩', '万圣', '庆祝', '传统'],
+  },
+  memes: {
+    en: ['meme', 'viral', 'trending', 'lol', 'lmao', 'tbh', 'fyi', 'omg'],
+    cn: ['梗', '流行', '热门'],
+  },
+  // 学术
+  'paper-writing': {
+    en: ['abstract', 'introduction', 'method', 'methodology', 'result', 'conclusion', 'reference', 'citation', 'hypothesis', 'experiment'],
+    cn: ['摘要', '引言', '方法', '结果', '结论', '引用', '假设', '实验', '文献'],
+  },
+  'academic-talk': {
+    en: ['lecture', 'seminar', 'conference', 'presentation', 'slide', 'audience', 'q and a'],
+    cn: ['讲座', '研讨', '会议', '演讲', '幻灯片', '听众', '答疑'],
+  },
+  reading: {
+    en: ['journal', 'paper', 'article', 'thesis', 'dissertation', 'literature', 'review'],
+    cn: ['期刊', '论文', '文章', '文献', '综述'],
+  },
+  // 旅行
+  'airport-hotel': {
+    en: ['airport', 'flight', 'boarding', 'check-in', 'baggage', 'luggage', 'hotel', 'reservation', 'room', 'lobby', 'concierge'],
+    cn: ['机场', '航班', '登机', '值机', '行李', '酒店', '预订', '房间', '大堂', '前台'],
+  },
+  directions: {
+    en: ['direction', 'map', 'left', 'right', 'straight', 'block', 'corner', 'intersection', 'avenue', 'street', 'nearby'],
+    cn: ['方向', '地图', '左', '右', '直走', '路口', '街', '附近'],
+  },
+  complaints: {
+    en: ['complaint', 'lost', 'stolen', 'broken', 'damaged', 'refund', 'help', 'emergency'],
+    cn: ['投诉', '丢失', '被偷', '损坏', '退款', '求助', '紧急'],
+  },
+  // 兼容老值
+  workplace: { en: [], cn: [] },
+  computing: { en: [], cn: [] },
+  ai: { en: [], cn: [] },
+  travel: { en: [], cn: [] },
+  daily: { en: [], cn: [] },
+  food: { en: [], cn: [] },
+};
+
+/**
+ * 用关键词匹配给文本打场景标签。
+ * 任何（en 关键词在 en 文本里 出现） 或 （cn 关键词在 cn 文本里 出现） → 命中该场景。
+ */
+export function classifyScenarios(en?: string, cn?: string): Scenario[] {
+  const hits: Scenario[] = [];
+  const enLower = en?.toLowerCase() ?? '';
+  const cnNorm = cn ?? '';
+  for (const [scenario, kws] of Object.entries(SCENARIO_KEYWORDS) as Array<[Scenario, { en: string[]; cn: string[] }]>) {
+    // 老兼容值（misc 组）不分类
+    if (SCENARIO_INFO[scenario].group === 'misc') continue;
+    let hit = false;
+    if (enLower && kws.en.some((kw) => enLower.includes(kw))) hit = true;
+    if (!hit && cnNorm && kws.cn.some((kw) => cnNorm.includes(kw))) hit = true;
+    if (hit) hits.push(scenario);
+  }
+  return hits;
+}

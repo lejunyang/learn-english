@@ -7,9 +7,18 @@ import {
   upsertIndexEntry,
   fingerprintOf,
   readRecentMistakes,
+  pickDictBy,
+  pickCorpusBy,
 } from '../../domain/store.js';
 import { newEntry } from '../../domain/fsrs.js';
-import { ItemSchema, type Item, type Scenario } from '../../domain/schemas.js';
+import {
+  ItemSchema,
+  type Item,
+  type Scenario,
+  type DictEntry,
+  type CorpusEntry,
+  type GeneratedItem,
+} from '../../domain/schemas.js';
 
 export interface NewLearningInput {
   scenario: Scenario;
@@ -17,69 +26,99 @@ export interface NewLearningInput {
   sessionId: string;
   modelId?: string;
   effort?: 'low' | 'medium' | 'high';
+  /** AI 占比 0~1。默认 0 = 全本地，1 = 全 AI。本地不足会自动用 AI 补到 count */
+  aiRatio?: number;
 }
 
 export interface NewLearningOutput {
   created: Item[];
   requested: number;
-  generated: number;
-  duplicates: number;
+  localUsed: number;
+  aiGenerated: number;
+  aiDuplicates: number;
 }
 
 /**
- * 新学习 workflow：估题量 → 取指纹 → 生成 → 校验 → 去重 → 持久化（items + schedule + index）
+ * 新学习 workflow：
+ * 1. 估题量 count
+ * 2. 本地从 dict/corpus 拼装 (count × (1-aiRatio)) 条
+ * 3. 不够 / aiRatio > 0 时再请 AI 生成补足
+ * 4. 落盘
  */
 export async function runNewLearning(input: NewLearningInput): Promise<NewLearningOutput> {
-  // ~30 秒/题估算
   const baseCount = Math.max(3, Math.min(40, Math.round(input.minutes * 2)));
-  // effort 影响生成量倍率
   const effortMultiplier = input.effort === 'low' ? 0.7 : input.effort === 'high' ? 1.5 : 1;
   const count = Math.max(3, Math.min(60, Math.round(baseCount * effortMultiplier)));
 
+  const aiRatio = Math.max(0, Math.min(1, input.aiRatio ?? 0));
+  const aiTarget = Math.round(count * aiRatio);
+  const localTarget = count - aiTarget;
+
   const fps = await existingFingerprints();
-  const fpList = Array.from(fps);
 
-  // 取该场景下用户最近常错的表达，让生成器针对性出题
-  const allRecent = await readRecentMistakes({ days: 30, limit: 50 });
-  const recentMistakes = allRecent
-    .filter((m) => !m.scenario || m.scenario === input.scenario)
-    .slice(0, 10)
-    .map((m) => ({
-      prompt: m.prompt,
-      correctAnswer: m.correctAnswer,
-      userAnswer: m.userAnswer,
-      suggestion: m.suggestion,
-    }));
-
-  const { items: generated, model } = await generateItems({
+  // ── 本地拼装 ──
+  const localItems = await assembleLocalItems({
     scenario: input.scenario,
-    count,
-    existingFingerprints: fpList,
-    recentMistakes,
-    modelId: input.modelId,
+    desired: localTarget,
+    sessionId: input.sessionId,
+    fingerprints: fps,
   });
+  // 本地实际能给的数量 (≤ localTarget)；不足的部分由 AI 补
+  const aiNeeded = count - localItems.length;
 
-  const deduped = dedupeGenerated(generated, fps);
+  // ── AI 生成（如果需要）──
+  let aiCreated: Item[] = [];
+  let aiGeneratedCount = 0;
+  let aiDupCount = 0;
+  if (aiNeeded > 0) {
+    const allRecent = await readRecentMistakes({ days: 30, limit: 50 });
+    const recentMistakes = allRecent
+      .filter((m) => !m.scenario || m.scenario === input.scenario)
+      .slice(0, 10)
+      .map((m) => ({
+        prompt: m.prompt,
+        correctAnswer: m.correctAnswer,
+        userAnswer: m.userAnswer,
+        suggestion: m.suggestion,
+      }));
 
-  const now = new Date().toISOString();
-  const full: Item[] = deduped.map((g) =>
-    ItemSchema.parse({
-      ...g,
-      scenario: g.scenario ?? input.scenario, // 模型可能没填
-      id: ulid(),
-      related: [],
-      source: { sessionId: input.sessionId, createdAt: now, model },
-      stats: { attempts: 0, correct: 0 },
-    }),
-  );
+    const { items: generated, model } = await generateItems({
+      scenario: input.scenario,
+      count: aiNeeded,
+      existingFingerprints: Array.from(fps),
+      recentMistakes,
+      modelId: input.modelId,
+    });
+    aiGeneratedCount = generated.length;
+    const deduped = dedupeGenerated(generated, fps);
+    aiDupCount = generated.length - deduped.length;
+
+    const now = new Date().toISOString();
+    aiCreated = deduped.map((g) =>
+      ItemSchema.parse({
+        ...g,
+        scenario: g.scenario ?? input.scenario,
+        id: ulid(),
+        related: [],
+        source: { sessionId: input.sessionId, createdAt: now, model },
+        stats: { attempts: 0, correct: 0 },
+      }),
+    );
+  }
+
+  const full = [...localItems, ...aiCreated];
 
   if (full.length === 0) {
-    return { created: [], requested: count, generated: generated.length, duplicates: generated.length };
+    return {
+      created: [],
+      requested: count,
+      localUsed: 0,
+      aiGenerated: aiGeneratedCount,
+      aiDuplicates: aiDupCount,
+    };
   }
 
   await appendItems(full);
-
-  // 给每条新建一个 schedule（due=now，立即可学）+ index
   for (const it of full) {
     await upsertScheduleEntry(it.id, newEntry());
     await upsertIndexEntry(it.id, {
@@ -95,7 +134,260 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
   return {
     created: full,
     requested: count,
-    generated: generated.length,
-    duplicates: generated.length - deduped.length,
+    localUsed: localItems.length,
+    aiGenerated: aiGeneratedCount,
+    aiDuplicates: aiDupCount,
   };
+}
+
+// ============================================================
+// 本地拼装：把 dict/corpus 转成 Item
+// ============================================================
+async function assembleLocalItems(opts: {
+  scenario: Scenario;
+  desired: number;
+  sessionId: string;
+  fingerprints: Set<string>;
+}): Promise<Item[]> {
+  if (opts.desired <= 0) return [];
+
+  const now = new Date().toISOString();
+  const out: Item[] = [];
+
+  // dict 候选（取较大池子用于挑词 + 造 distractors）
+  const dictPool = await pickDictBy({ scenario: opts.scenario, limit: 500 });
+  const corpusPool = await pickCorpusBy({ scenario: opts.scenario, limit: 200 });
+
+  // 没有任何本地数据 → 返回空，让 AI 全部接手
+  if (dictPool.length === 0 && corpusPool.length === 0) return out;
+
+  // 按类型分配：词典出 en2cn / cn2en（各占 35%），语料出 cloze + translate（各占 15%）
+  const target = {
+    en2cn: Math.round(opts.desired * 0.35),
+    cn2en: Math.round(opts.desired * 0.35),
+    cloze: Math.round(opts.desired * 0.15),
+    translate: opts.desired - Math.round(opts.desired * 0.85),
+  };
+
+  // 打乱
+  const dictShuffled = shuffle(dictPool);
+  const corpusShuffled = shuffle(corpusPool);
+  let dictCursor = 0;
+  let corpusCursor = 0;
+
+  // en2cn
+  for (let i = 0; i < target.en2cn && dictCursor < dictShuffled.length; ) {
+    const d = dictShuffled[dictCursor++];
+    if (!d) continue;
+    const item = dictToItem(d, 'en2cn', dictPool, opts);
+    if (!item) continue;
+    if (opts.fingerprints.has(fingerprintOf(item))) continue;
+    out.push({ ...item, source: { sessionId: opts.sessionId, createdAt: now, model: 'local:ecdict' } });
+    opts.fingerprints.add(fingerprintOf(item));
+    i++;
+  }
+  // cn2en
+  for (let i = 0; i < target.cn2en && dictCursor < dictShuffled.length; ) {
+    const d = dictShuffled[dictCursor++];
+    if (!d) continue;
+    const item = dictToItem(d, 'cn2en', dictPool, opts);
+    if (!item) continue;
+    if (opts.fingerprints.has(fingerprintOf(item))) continue;
+    out.push({ ...item, source: { sessionId: opts.sessionId, createdAt: now, model: 'local:ecdict' } });
+    opts.fingerprints.add(fingerprintOf(item));
+    i++;
+  }
+  // cloze
+  for (let i = 0; i < target.cloze && corpusCursor < corpusShuffled.length; ) {
+    const c = corpusShuffled[corpusCursor++];
+    if (!c) continue;
+    const item = corpusToCloze(c, dictPool, opts);
+    if (!item) continue;
+    if (opts.fingerprints.has(fingerprintOf(item))) continue;
+    out.push({ ...item, source: { sessionId: opts.sessionId, createdAt: now, model: 'local:corpus' } });
+    opts.fingerprints.add(fingerprintOf(item));
+    i++;
+  }
+  // translate
+  for (let i = 0; i < target.translate && corpusCursor < corpusShuffled.length; ) {
+    const c = corpusShuffled[corpusCursor++];
+    if (!c) continue;
+    const item = corpusToTranslate(c, opts);
+    if (!item) continue;
+    if (opts.fingerprints.has(fingerprintOf(item))) continue;
+    out.push({ ...item, source: { sessionId: opts.sessionId, createdAt: now, model: 'local:corpus' } });
+    opts.fingerprints.add(fingerprintOf(item));
+    i++;
+  }
+
+  return out;
+}
+
+// dict → en2cn / cn2en Item
+function dictToItem(
+  d: DictEntry,
+  type: 'en2cn' | 'cn2en',
+  pool: DictEntry[],
+  opts: { scenario: Scenario; sessionId: string },
+): Item | null {
+  // 取第一个 sense 的第一个中文释义
+  const sense = d.senses[0];
+  if (!sense || sense.cn.length === 0) return null;
+  const cn = sense.cn[0];
+  if (!cn) return null;
+  // distractors: 从同 pool 里取 3 个不同 lemma 的对应翻译
+  const distractors = pickDistractors(pool, d, type, 3);
+  if (distractors.length < 3) return null;
+
+  const promptObj = type === 'en2cn' ? { en: d.lemma } : { cn };
+  const answerObj = type === 'en2cn' ? { cn } : { en: d.lemma };
+
+  const draft: GeneratedItem = {
+    type,
+    scenario: opts.scenario,
+    langTags: ['word'],
+    difficulty: d.difficulty,
+    prompt: promptObj,
+    answer: answerObj,
+    distractors,
+    hints: {
+      weak: sense.pos ? `词性：${sense.pos}` : '类型：单词',
+      strong: type === 'en2cn'
+        ? `首字母：${cn.slice(0, 1)}`
+        : `首字母：${d.lemma.slice(0, 1)}`,
+    },
+    ...(d.ipa ? { phonetics: { ipa: d.ipa.us || d.ipa.uk || d.ipa.any } } : {}),
+  };
+
+  return ItemSchema.parse({
+    ...draft,
+    id: ulid(),
+    related: [],
+    source: { sessionId: opts.sessionId, createdAt: new Date().toISOString(), model: 'local:ecdict' },
+    stats: { attempts: 0, correct: 0 },
+  });
+}
+
+function pickDistractors(
+  pool: DictEntry[],
+  exclude: DictEntry,
+  type: 'en2cn' | 'cn2en',
+  n: number,
+): string[] {
+  const seen = new Set<string>();
+  const excludeKey = (type === 'en2cn' ? exclude.senses[0]?.cn[0] : exclude.lemma)?.toLowerCase() ?? '';
+  // 同 pool 取相近难度
+  const candidates = pool.filter(
+    (d) => d.lemma.toLowerCase() !== exclude.lemma.toLowerCase() &&
+      Math.abs(d.difficulty - exclude.difficulty) <= 1,
+  );
+  const shuffled = shuffle(candidates);
+  const out: string[] = [];
+  for (const d of shuffled) {
+    const txt = type === 'en2cn' ? d.senses[0]?.cn[0] : d.lemma;
+    if (!txt) continue;
+    const key = txt.toLowerCase();
+    if (key === excludeKey || seen.has(key)) continue;
+    seen.add(key);
+    out.push(txt);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+// corpus → cloze Item
+function corpusToCloze(
+  c: CorpusEntry,
+  dictPool: DictEntry[],
+  opts: { scenario: Scenario; sessionId: string },
+): Item | null {
+  if (!c.keywords || c.keywords.length === 0) return null;
+  // 选第一个 keyword 挖空
+  const target = c.keywords[0];
+  if (!target) return null;
+  // 必须在句子里能找到
+  const re = new RegExp(`\\b${escapeRegex(target)}\\b`, 'i');
+  if (!re.test(c.en)) return null;
+  const cloze = c.en.replace(re, '___');
+
+  // distractors: 同词性/同长度的 dict 词
+  const distractors = pickDistractorsForCloze(dictPool, target, 3);
+  if (distractors.length < 3) return null;
+
+  const draft: GeneratedItem = {
+    type: 'cloze',
+    scenario: opts.scenario,
+    langTags: ['sentence'],
+    difficulty: c.difficulty,
+    prompt: { cloze },
+    answer: { en: target },
+    distractors,
+    hints: {
+      weak: `首字母：${target.slice(0, 1)}`,
+      strong: c.cn ? `中文：${c.cn}` : `长度：${target.length}`,
+    },
+  };
+
+  return ItemSchema.parse({
+    ...draft,
+    id: ulid(),
+    related: [],
+    source: { sessionId: opts.sessionId, createdAt: new Date().toISOString(), model: 'local:corpus' },
+    stats: { attempts: 0, correct: 0 },
+  });
+}
+
+function pickDistractorsForCloze(dictPool: DictEntry[], target: string, n: number): string[] {
+  const seen = new Set<string>([target.toLowerCase()]);
+  // 长度差 ≤2 的 lemma 优先
+  const candidates = dictPool.filter(
+    (d) => Math.abs(d.lemma.length - target.length) <= 2 && /^[a-zA-Z]+$/.test(d.lemma),
+  );
+  const shuffled = shuffle(candidates);
+  const out: string[] = [];
+  for (const d of shuffled) {
+    const key = d.lemma.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(d.lemma);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+// corpus → translate Item
+function corpusToTranslate(c: CorpusEntry, opts: { scenario: Scenario; sessionId: string }): Item | null {
+  if (!c.cn) return null;
+  const draft: GeneratedItem = {
+    type: 'translate',
+    scenario: opts.scenario,
+    langTags: ['sentence'],
+    difficulty: c.difficulty,
+    prompt: { cn: c.cn },
+    answer: { en: c.en },
+    hints: {
+      weak: `句长约 ${c.en.split(/\s+/).length} 词`,
+      strong: `首词：${c.en.split(/\s+/)[0]}`,
+    },
+  };
+  return ItemSchema.parse({
+    ...draft,
+    id: ulid(),
+    related: [],
+    source: { sessionId: opts.sessionId, createdAt: new Date().toISOString(), model: 'local:corpus' },
+    stats: { attempts: 0, correct: 0 },
+  });
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
