@@ -55,8 +55,27 @@ async function getJSON<T>(url: string): Promise<T> {
 }
 
 export const api = {
-  start: (body: { mode: 'new' | 'review'; scenario?: string; minutes: number }) =>
-    postJSON<StartResponse>('/api/session/start', body),
+  start: (body: {
+    mode: 'new' | 'review';
+    scenario?: string;
+    minutes: number;
+    model?: string;
+    effort?: 'low' | 'medium' | 'high';
+  }) => postJSON<StartResponse>('/api/session/start', body),
+
+  models: () =>
+    getJSON<{ models: string[]; defaults: { generator: string; grader: string; coach: string } }>(
+      '/api/config/models',
+    ),
+
+  scenarios: () =>
+    getJSON<{
+      groups: Array<{
+        group: string;
+        groupLabel: string;
+        items: Array<{ id: string; label: string; hint: string }>;
+      }>;
+    }>('/api/config/scenarios'),
 
   current: (id: string) => getJSON<{ current?: Item; done?: boolean; index?: number; total?: number }>(
     `/api/session/${id}/current`,

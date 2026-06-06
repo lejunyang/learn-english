@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { models, MODEL_IDS } from '../provider.js';
+import { models, modelById, MODEL_IDS } from '../provider.js';
 import { TranslationGradeSchema, type TranslationGrade } from '../../domain/schemas.js';
 
 const SYSTEM = `你是一个严格但友好的英语翻译评分员。
@@ -34,13 +34,18 @@ export async function gradeTranslation(input: {
   cn: string;
   userEn: string;
   referenceEn: string;
+  modelId?: string;
 }): Promise<{ grade: TranslationGrade; model: string }> {
   const prompt = `中文原文：${input.cn}
 用户译文：${input.userEn}
 参考译文：${input.referenceEn}
 
 请评分，以 JSON 形式按 schema 输出。`;
-  const res = await agent.generate(prompt, { structuredOutput: { schema: TranslationGradeSchema } });
+  const usedModelId = input.modelId || MODEL_IDS.grader;
+  const res = await agent.generate(prompt, {
+    structuredOutput: { schema: TranslationGradeSchema },
+    ...(input.modelId ? { model: modelById(input.modelId) } : {}),
+  });
   const grade = (res as unknown as { object: TranslationGrade }).object;
-  return { grade, model: MODEL_IDS.grader };
+  return { grade, model: usedModelId };
 }

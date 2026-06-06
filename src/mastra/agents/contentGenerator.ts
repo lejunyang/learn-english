@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
-import { models, MODEL_IDS } from '../provider.js';
+import { models, modelById, MODEL_IDS } from '../provider.js';
 import { GeneratedItemSchema, SCENARIOS, type Scenario, type GeneratedItem } from '../../domain/schemas.js';
 import { SCENARIO_LABELS, SUGGESTED_LANG_TAGS } from '../../domain/tags.js';
 
@@ -77,10 +77,12 @@ export async function generateItems(opts: {
   scenario: Scenario;
   count: number;
   existingFingerprints: string[];
-  // 题型分布建议（可选）：{en2cn: 0.3, cn2en: 0.3, translate: 0.2, cloze: 0.2}
+  // 题型分布建议（可选）
   typeMix?: Partial<Record<GeneratedItem['type'], number>>;
-  // 用户最近常错的表达 —— 让生成器针对性出类似练习
+  // 用户最近常错的表达
   recentMistakes?: Array<{ prompt: string; correctAnswer: string; userAnswer: string; suggestion?: string }>;
+  // 临时覆盖模型 id（来自前端 session 选择）
+  modelId?: string;
 }): Promise<{ items: GeneratedItem[]; model: string }> {
   const mix = opts.typeMix ?? { en2cn: 0.35, cn2en: 0.35, translate: 0.15, cloze: 0.15 };
   const dist = Object.entries(mix)
@@ -105,12 +107,14 @@ export async function generateItems(opts: {
 
 题型分布建议：${dist}。${mistakeHint}${fpHint}`;
 
+  const usedModelId = opts.modelId || MODEL_IDS.generator;
   const res = await agent.generate(prompt, {
     structuredOutput: { schema: GenerationResultSchema },
+    ...(opts.modelId ? { model: modelById(opts.modelId) } : {}),
   });
   const obj = (res as unknown as { object?: { items: GeneratedItem[] } }).object;
   const items = obj?.items ?? [];
-  return { items, model: MODEL_IDS.generator };
+  return { items, model: usedModelId };
 }
 
 export { GenerationResultSchema };

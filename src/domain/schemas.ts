@@ -3,7 +3,22 @@ import { z } from 'zod';
 // ============================================================
 // 受控词表 —— 见 src/domain/tags.ts
 // ============================================================
-export const SCENARIOS = ['workplace', 'computing', 'ai', 'travel', 'daily', 'food'] as const;
+export const SCENARIOS = [
+  // 旧值（向后兼容历史 items.jsonl）
+  'workplace', 'computing', 'ai', 'travel', 'daily', 'food',
+  // ── 工作 ──
+  'biz-email', 'meeting', 'interview', 'negotiation', 'slack',
+  // ── 技术 ──
+  'coding', 'ai-ml', 'devops', 'data', 'system-design',
+  // ── 生活 ──
+  'shopping', 'dining', 'doctor', 'rent', 'transport',
+  // ── 文化 ──
+  'movies', 'idioms', 'festivals', 'memes',
+  // ── 学术 ──
+  'paper-writing', 'academic-talk', 'reading',
+  // ── 旅行 ──
+  'airport-hotel', 'directions', 'complaints',
+] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export const ITEM_TYPES = ['en2cn', 'cn2en', 'translate', 'cloze'] as const;

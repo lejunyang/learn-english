@@ -17,6 +17,8 @@ export interface ActiveSession {
   startedAtMs: number;
   questionStartedAtMs: number;
   hintUsedThisQuestion: HintLevel;
+  modelId?: string;
+  effort?: 'low' | 'medium' | 'high';
 }
 
 const active = new Map<string, ActiveSession>();
@@ -25,6 +27,8 @@ const active = new Map<string, ActiveSession>();
 interface DraftExtra {
   queueIds: string[];
   cursor: number;
+  modelId?: string;
+  effort?: 'low' | 'medium' | 'high';
 }
 const DRAFT_EXTRA_KEY = '__learnDraft' as const;
 
@@ -47,6 +51,8 @@ async function persistDraft(act: ActiveSession): Promise<void> {
     packDraft(act.session, {
       queueIds: act.queue.map((q) => q.id),
       cursor: act.cursor,
+      modelId: act.modelId,
+      effort: act.effort,
     }),
   );
 }
@@ -57,6 +63,8 @@ export function createSession(opts: {
   plannedMinutes: number;
   queue: Item[];
   id?: string;
+  modelId?: string;
+  effort?: 'low' | 'medium' | 'high';
 }): ActiveSession {
   const id = opts.id ?? ulid();
   const now = new Date();
@@ -75,6 +83,8 @@ export function createSession(opts: {
     startedAtMs: now.getTime(),
     questionStartedAtMs: now.getTime(),
     hintUsedThisQuestion: 'none',
+    modelId: opts.modelId,
+    effort: opts.effort,
   };
   active.set(id, act);
   void persistDraft(act);
@@ -113,6 +123,8 @@ export async function restoreSession(id: string): Promise<ActiveSession | undefi
     startedAtMs: new Date(session.startedAt).getTime(),
     questionStartedAtMs: now, // 重启后从现在开始计时本题
     hintUsedThisQuestion: 'none',
+    modelId: extra.modelId,
+    effort: extra.effort,
   };
   active.set(id, act);
   return act;

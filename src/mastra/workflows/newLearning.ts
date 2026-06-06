@@ -15,6 +15,8 @@ export interface NewLearningInput {
   scenario: Scenario;
   minutes: number;
   sessionId: string;
+  modelId?: string;
+  effort?: 'low' | 'medium' | 'high';
 }
 
 export interface NewLearningOutput {
@@ -29,7 +31,10 @@ export interface NewLearningOutput {
  */
 export async function runNewLearning(input: NewLearningInput): Promise<NewLearningOutput> {
   // ~30 秒/题估算
-  const count = Math.max(3, Math.min(40, Math.round(input.minutes * 2)));
+  const baseCount = Math.max(3, Math.min(40, Math.round(input.minutes * 2)));
+  // effort 影响生成量倍率
+  const effortMultiplier = input.effort === 'low' ? 0.7 : input.effort === 'high' ? 1.5 : 1;
+  const count = Math.max(3, Math.min(60, Math.round(baseCount * effortMultiplier)));
 
   const fps = await existingFingerprints();
   const fpList = Array.from(fps);
@@ -51,6 +56,7 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
     count,
     existingFingerprints: fpList,
     recentMistakes,
+    modelId: input.modelId,
   });
 
   const deduped = dedupeGenerated(generated, fps);

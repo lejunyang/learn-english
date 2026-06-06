@@ -6,6 +6,7 @@ import { serve, type ServerType } from '@hono/node-server';
 import { sessionRoutes } from './routes/session.js';
 import { itemRoutes } from './routes/items.js';
 import { statsRoutes } from './routes/stats.js';
+import { configRoutes } from './routes/config.js';
 
 const app = new Hono();
 
@@ -24,6 +25,7 @@ app.get('/api/health', (c) =>
 app.route('/api/session', sessionRoutes);
 app.route('/api/items', itemRoutes);
 app.route('/api/stats', statsRoutes);
+app.route('/api/config', configRoutes);
 
 const port = parseInt(process.env.PORT ?? '5174');
 

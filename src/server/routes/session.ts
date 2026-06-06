@@ -33,13 +33,15 @@ const StartBody = z.object({
   mode: z.enum(['new', 'review']),
   scenario: z.enum(SCENARIOS).optional(),
   minutes: z.number().int().positive().max(120),
+  model: z.string().optional(),
+  effort: z.enum(['low', 'medium', 'high']).optional(),
 });
 
 sessionRoutes.post('/start', async (c) => {
   const parsed = StartBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  const { mode, scenario, minutes } = parsed.data;
+  const { mode, scenario, minutes, model, effort } = parsed.data;
   const sessionId = ulid();
 
   let queue: Item[];
@@ -47,7 +49,7 @@ sessionRoutes.post('/start', async (c) => {
 
   if (mode === 'new') {
     if (!scenario) return c.json({ error: 'scenario required for mode=new' }, 400);
-    const result = await runNewLearning({ scenario, minutes, sessionId });
+    const result = await runNewLearning({ scenario, minutes, sessionId, modelId: model, effort });
     queue = result.created;
     meta = {
       requested: result.requested,
@@ -57,7 +59,7 @@ sessionRoutes.post('/start', async (c) => {
   } else {
     const result = await runReviewPick({ scenario, minutes });
     queue = result.items;
-    meta = { available: result.available };
+    meta = { available: result.available, mistakeBoost: result.mistakeBoost };
   }
 
   if (queue.length === 0) {
@@ -70,6 +72,8 @@ sessionRoutes.post('/start', async (c) => {
     plannedMinutes: minutes,
     queue,
     id: sessionId,
+    modelId: model,
+    effort,
   });
   return c.json({
     sessionId: act.session.id,
@@ -199,6 +203,7 @@ sessionRoutes.post('/:id/grade-translation', async (c) => {
     cn: item.prompt.cn,
     userEn: parsed.data.userAnswer,
     referenceEn: item.answer.en,
+    modelId: act.modelId,
   });
 
   await applyAndPersist(parsed.data.itemId, grade.score as ReviewScore, item, grade.feedback);
