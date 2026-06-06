@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { serve } from '@hono/node-server';
+import { serve, type ServerType } from '@hono/node-server';
 import { sessionRoutes } from './routes/session.js';
 import { itemRoutes } from './routes/items.js';
 import { statsRoutes } from './routes/stats.js';
@@ -27,6 +27,33 @@ app.route('/api/stats', statsRoutes);
 
 const port = parseInt(process.env.PORT ?? '5174');
 
-serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`[server] listening on http://localhost:${info.port}`);
-});
+let server: ServerType | undefined;
+
+function startServer(attempt = 0): void {
+  server = serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`[server] listening on http://localhost:${info.port}`);
+  });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && attempt < 5) {
+      // tsx watch 热重启时旧进程释放端口慢一拍，重试几次即可
+      const delay = 300 * (attempt + 1);
+      console.warn(`[server] port ${port} busy, retry in ${delay}ms (attempt ${attempt + 1}/5)`);
+      setTimeout(() => startServer(attempt + 1), delay);
+    } else {
+      console.error('[server] failed to listen:', err.message);
+      process.exit(1);
+    }
+  });
+}
+
+// 收到信号时优雅关闭，避免下一次启动撞端口
+function shutdown(signal: string) {
+  console.log(`[server] received ${signal}, closing...`);
+  server?.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref(); // 兜底
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGHUP', () => shutdown('SIGHUP'));
+
+startServer();

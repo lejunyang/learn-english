@@ -11,6 +11,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build": "pnpm build:server && pnpm build:web",
     "start": "node dist/server/index.js",
+    "kill": "node scripts/kill-ports.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

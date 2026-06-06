@@ -9,6 +9,7 @@ import { readSchedule, upsertScheduleEntry, updateItem } from '../../domain/stor
 import {
   createSession,
   getSession,
+  restoreSession,
   currentQuestion,
   recordAttempt,
   markHint,
@@ -75,11 +76,11 @@ sessionRoutes.post('/start', async (c) => {
 // ============================================================
 // 当前题
 // ============================================================
-sessionRoutes.get('/:id/current', (c) => {
+sessionRoutes.get('/:id/current', async (c) => {
   const id = c.req.param('id');
-  const item = currentQuestion(id);
-  const act = getSession(id);
+  const act = (await restoreSession(id)) ?? getSession(id);
   if (!act) return c.json({ error: 'session not found' }, 404);
+  const item = act.queue[act.cursor];
   if (!item) return c.json({ done: true });
   return c.json({
     current: sanitizeForClient(item),
@@ -91,9 +92,10 @@ sessionRoutes.get('/:id/current', (c) => {
 // ============================================================
 // 提示
 // ============================================================
-sessionRoutes.get('/:id/hint', (c) => {
+sessionRoutes.get('/:id/hint', async (c) => {
   const id = c.req.param('id');
   const level = c.req.query('level') === 'strong' ? 'strong' : 'weak';
+  await restoreSession(id);
   const item = currentQuestion(id);
   if (!item) return c.json({ error: 'no current question' }, 404);
   markHint(id, level);
@@ -111,7 +113,7 @@ const GradeBody = z.object({
 
 sessionRoutes.post('/:id/grade', async (c) => {
   const id = c.req.param('id');
-  const act = getSession(id);
+  const act = (await restoreSession(id)) ?? getSession(id);
   if (!act) return c.json({ error: 'session not found' }, 404);
   const parsed = GradeBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -152,7 +154,7 @@ const GradeTranslationBody = z.object({
 
 sessionRoutes.post('/:id/grade-translation', async (c) => {
   const id = c.req.param('id');
-  const act = getSession(id);
+  const act = (await restoreSession(id)) ?? getSession(id);
   if (!act) return c.json({ error: 'session not found' }, 404);
   const parsed = GradeTranslationBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -203,7 +205,7 @@ sessionRoutes.get('/:id/coach', async (c) => {
   const id = c.req.param('id');
   const itemId = c.req.query('itemId');
   const userAnswer = c.req.query('userAnswer') ?? '';
-  const act = getSession(id);
+  const act = (await restoreSession(id)) ?? getSession(id);
   if (!act) return c.json({ error: 'session not found' }, 404);
   // 找最近一次该 itemId 的 attempt
   const item =
@@ -253,6 +255,7 @@ sessionRoutes.get('/:id/coach', async (c) => {
 // ============================================================
 sessionRoutes.post('/:id/finish', async (c) => {
   const id = c.req.param('id');
+  await restoreSession(id);
   const session = await finishSession(id);
   if (!session) return c.json({ error: 'session not found' }, 404);
 

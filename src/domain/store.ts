@@ -6,6 +6,7 @@ import {
   ScheduleMapSchema,
   IndexMapSchema,
   SessionSchema,
+  DraftSessionSchema,
   type Item,
   type ScheduleMap,
   type ScheduleEntry,
@@ -208,18 +209,18 @@ export async function appendSession(session: Session): Promise<void> {
   await fs.appendFile(file, line, 'utf8');
 }
 
-// 保存草稿（覆盖式，便于 resume）
+// 保存草稿（覆盖式，便于 resume）—— 允许额外字段（queueIds/cursor）
 export async function saveDraftSession(session: Session): Promise<void> {
   await ensureDirs();
   const file = path.join(DRAFTS_DIR, `${session.id}.json`);
-  await atomicWriteText(file, stableStringify(SessionSchema.parse(session)));
+  await atomicWriteText(file, stableStringify(DraftSessionSchema.parse(session)));
 }
 
 export async function loadDraftSession(id: string): Promise<Session | null> {
   const file = path.join(DRAFTS_DIR, `${id}.json`);
   const raw = await readJsonIfExists<unknown | null>(file, null);
   if (raw === null) return null;
-  return SessionSchema.parse(raw);
+  return DraftSessionSchema.parse(raw) as Session;
 }
 
 export async function deleteDraftSession(id: string): Promise<void> {
