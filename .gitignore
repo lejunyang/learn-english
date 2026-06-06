@@ -12,3 +12,6 @@ data/drafts/
 data/*.tmp
 # 原始数据源 (大文件)，由 pnpm ingest 处理后产生 data/dict.jsonl / corpus.jsonl
 data/raw/
+# 派生的本地语料（可由 `pnpm ingest:ecdict` 重新生成；太大不进 git）
+data/dict.jsonl
+data/corpus.jsonl

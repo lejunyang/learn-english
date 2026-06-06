@@ -126,7 +126,7 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
   // 技术
   coding: {
     en: ['code', 'function', 'variable', 'class', 'method', 'bug', 'debug', 'commit', 'merge', 'pull request', 'review', 'refactor', 'syntax', 'compile'],
-    cn: ['代码', '函数', '变量', '类', '方法', '调试', '提交', '合并', '重构', '编译'],
+    cn: ['代码', '函数', '变量', '类型', '方法', '调试', '提交', '合并', '重构', '编译', '编程', '程序'],
   },
   'ai-ml': {
     en: ['model', 'training', 'inference', 'neural', 'dataset', 'prompt', 'agent', 'embedding', 'token', 'fine-tune', 'gradient', 'loss'],
@@ -138,7 +138,7 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
   },
   data: {
     en: ['sql', 'query', 'database', 'table', 'index', 'join', 'aggregate', 'pipeline', 'etl', 'dashboard', 'report', 'metric'],
-    cn: ['数据库', '查询', '表', '聚合', '指标', '报表'],
+    cn: ['数据库', '查询', '表格', '聚合', '指标', '报表', '数据'],
   },
   'system-design': {
     en: ['architecture', 'scalability', 'load balancer', 'cache', 'queue', 'microservice', 'latency', 'throughput', 'consistency', 'partition'],
@@ -147,15 +147,15 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
   // 生活
   shopping: {
     en: ['buy', 'shop', 'store', 'price', 'sale', 'discount', 'refund', 'return', 'cashier', 'receipt', 'try on', 'size', 'fit'],
-    cn: ['购物', '买', '商店', '价格', '打折', '退款', '试穿', '尺码', '收银'],
+    cn: ['购物', '购买', '商店', '价格', '打折', '退款', '试穿', '尺码', '收银'],
   },
   dining: {
     en: ['menu', 'order', 'waiter', 'waitress', 'reservation', 'bill', 'tip', 'spicy', 'allergic', 'vegetarian', 'takeout', 'delivery'],
-    cn: ['菜单', '点餐', '服务员', '预订', '账单', '小费', '辣', '过敏', '素食', '外卖'],
+    cn: ['菜单', '点餐', '服务员', '预订', '账单', '小费', '辛辣', '过敏', '素食', '外卖'],
   },
   doctor: {
     en: ['doctor', 'patient', 'symptom', 'pain', 'fever', 'cough', 'prescription', 'medicine', 'hospital', 'clinic', 'appointment', 'diagnosis'],
-    cn: ['医生', '病人', '症状', '疼痛', '发烧', '咳嗽', '处方', '药', '医院', '诊所', '挂号', '诊断'],
+    cn: ['医生', '病人', '症状', '疼痛', '发烧', '咳嗽', '处方', '药物', '医院', '诊所', '挂号', '诊断'],
   },
   rent: {
     en: ['rent', 'landlord', 'tenant', 'lease', 'deposit', 'apartment', 'utility', 'sublet', 'roommate'],
@@ -180,7 +180,7 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
   },
   memes: {
     en: ['meme', 'viral', 'trending', 'lol', 'lmao', 'tbh', 'fyi', 'omg'],
-    cn: ['梗', '流行', '热门'],
+    cn: ['热门', '热梗', '流行语'],
   },
   // 学术
   'paper-writing': {
@@ -202,7 +202,7 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
   },
   directions: {
     en: ['direction', 'map', 'left', 'right', 'straight', 'block', 'corner', 'intersection', 'avenue', 'street', 'nearby'],
-    cn: ['方向', '地图', '左', '右', '直走', '路口', '街', '附近'],
+    cn: ['方向', '地图', '左转', '右转', '直走', '路口', '街道', '附近'],
   },
   complaints: {
     en: ['complaint', 'lost', 'stolen', 'broken', 'damaged', 'refund', 'help', 'emergency'],
@@ -219,17 +219,29 @@ export const SCENARIO_KEYWORDS: Record<Scenario, { en: string[]; cn: string[] }>
 
 /**
  * 用关键词匹配给文本打场景标签。
- * 任何（en 关键词在 en 文本里 出现） 或 （cn 关键词在 cn 文本里 出现） → 命中该场景。
+ * - 英文关键词：用 word boundary 严格匹配（避免 "ci" 误命中 "acid"）
+ * - 中文关键词：substring 匹配（最小 2 字符已在词表层面保证）
+ * 任何（en 关键词命中 en 文本） 或 （cn 关键词命中 cn 文本） → 命中该场景。
  */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function matchesEnWord(text: string, kw: string): boolean {
+  // 含空格的多词关键词用普通 substring
+  if (/\s/.test(kw)) return text.includes(kw);
+  // 单词用 word boundary（仅匹配前后非字母数字的位置）
+  const re = new RegExp(`(^|[^a-z0-9])${escapeRegex(kw)}($|[^a-z0-9])`, 'i');
+  return re.test(text);
+}
+
 export function classifyScenarios(en?: string, cn?: string): Scenario[] {
   const hits: Scenario[] = [];
   const enLower = en?.toLowerCase() ?? '';
   const cnNorm = cn ?? '';
   for (const [scenario, kws] of Object.entries(SCENARIO_KEYWORDS) as Array<[Scenario, { en: string[]; cn: string[] }]>) {
-    // 老兼容值（misc 组）不分类
     if (SCENARIO_INFO[scenario].group === 'misc') continue;
     let hit = false;
-    if (enLower && kws.en.some((kw) => enLower.includes(kw))) hit = true;
+    if (enLower && kws.en.some((kw) => matchesEnWord(enLower, kw))) hit = true;
     if (!hit && cnNorm && kws.cn.some((kw) => cnNorm.includes(kw))) hit = true;
     if (hit) hits.push(scenario);
   }

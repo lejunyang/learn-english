@@ -344,25 +344,36 @@ export async function buildDictIndex(): Promise<Map<string, DictEntry>> {
 
 /**
  * 按场景 + 难度过滤 dict 条目（候选池）。
+ * 默认只取有学术 tag（cet4/cet6/ky/toefl/ielts/gre/zk/gk）的词条，
+ * 这些是经过筛选的高质量词汇；按 difficulty 升序（先易后难）。
  */
 export async function pickDictBy(opts: {
   scenario?: Scenario;
-  difficulty?: number[]; // 允许的难度集合
+  difficulty?: number[];
   limit?: number;
+  /** 是否仅取带学术 tag 的词条（默认 true）。设为 false 则不过滤 */
+  taggedOnly?: boolean;
 }): Promise<DictEntry[]> {
   const all = await readAllDict();
-  const limit = opts.limit ?? Infinity;
-  const out: DictEntry[] = [];
-  for (const e of all) {
-    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) continue;
+  const taggedOnly = opts.taggedOnly !== false;
+  const filtered = all.filter((e) => {
+    if (taggedOnly && (!e.tags || e.tags.length === 0)) return false;
+    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) return false;
     if (opts.scenario) {
       const hit = e.senses.some((s) => s.scenarios.includes(opts.scenario as Scenario));
-      if (!hit) continue;
+      if (!hit) return false;
     }
-    out.push(e);
-    if (out.length >= limit) break;
-  }
-  return out;
+    return true;
+  });
+  filtered.sort((a, b) => {
+    // 先按 difficulty 升序
+    if (a.difficulty !== b.difficulty) return a.difficulty - b.difficulty;
+    // 同难度按 frq 升序（高频优先）
+    const af = a.frq ?? Number.MAX_SAFE_INTEGER;
+    const bf = b.frq ?? Number.MAX_SAFE_INTEGER;
+    return af - bf;
+  });
+  return opts.limit ? filtered.slice(0, opts.limit) : filtered;
 }
 
 // ============================================================

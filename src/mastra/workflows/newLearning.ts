@@ -94,16 +94,27 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
     aiDupCount = generated.length - deduped.length;
 
     const now = new Date().toISOString();
-    aiCreated = deduped.map((g) =>
-      ItemSchema.parse({
-        ...g,
+    aiCreated = deduped.map((g) => {
+      // 白名单过滤：只取 ItemSchema 接受的字段，去掉 AI 多塞的 fingerprint/id 等
+      const clean = {
+        type: g.type,
         scenario: g.scenario ?? input.scenario,
+        langTags: g.langTags ?? [],
+        difficulty: g.difficulty,
+        prompt: g.prompt,
+        answer: g.answer,
+        distractors: g.distractors,
+        hints: g.hints,
+        phonetics: g.phonetics,
+      };
+      return ItemSchema.parse({
+        ...clean,
         id: ulid(),
         related: [],
         source: { sessionId: input.sessionId, createdAt: now, model },
         stats: { attempts: 0, correct: 0 },
-      }),
-    );
+      });
+    });
   }
 
   const full = [...localItems, ...aiCreated];
@@ -154,8 +165,17 @@ async function assembleLocalItems(opts: {
   const now = new Date().toISOString();
   const out: Item[] = [];
 
-  // dict 候选（取较大池子用于挑词 + 造 distractors）
-  const dictPool = await pickDictBy({ scenario: opts.scenario, limit: 500 });
+  // dict 候选：先按 scenario 取，不够则放宽
+  let dictPool = await pickDictBy({ scenario: opts.scenario, limit: 500 });
+  if (dictPool.length < opts.desired * 0.5) {
+    // 场景命中太少 → 用通用高质量词补
+    const extra = await pickDictBy({ limit: 500 });
+    const seen = new Set(dictPool.map((d) => d.lemma.toLowerCase()));
+    for (const d of extra) {
+      if (!seen.has(d.lemma.toLowerCase())) dictPool.push(d);
+      if (dictPool.length >= 500) break;
+    }
+  }
   const corpusPool = await pickCorpusBy({ scenario: opts.scenario, limit: 200 });
 
   // 没有任何本地数据 → 返回空，让 AI 全部接手
