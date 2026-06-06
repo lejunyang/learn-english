@@ -34,13 +34,13 @@ export const searchItemsTool = createTool({
     items: z.array(ItemSchema),
     total: z.number().int().nonnegative(),
   }),
-  execute: async ({ context }) => {
+  execute: async (input) => {
     const all = await readAllItems();
-    const q = context.query?.toLowerCase();
+    const q = input.query?.toLowerCase();
     const filtered = all.filter((it) => {
-      if (context.scenario && it.scenario !== context.scenario) return false;
-      if (context.type && it.type !== context.type) return false;
-      if (context.tags && !context.tags.every((t) => it.langTags.includes(t))) return false;
+      if (input.scenario && it.scenario !== input.scenario) return false;
+      if (input.type && it.type !== input.type) return false;
+      if (input.tags && !input.tags.every((t: string) => it.langTags.includes(t))) return false;
       if (q) {
         const hay = [it.prompt.en, it.prompt.cn, it.prompt.cloze, it.answer.en, it.answer.cn]
           .filter(Boolean)
@@ -50,7 +50,7 @@ export const searchItemsTool = createTool({
       }
       return true;
     });
-    return { items: filtered.slice(0, context.limit), total: filtered.length };
+    return { items: filtered.slice(0, input.limit ?? 50), total: filtered.length };
   },
 });
 
@@ -68,14 +68,14 @@ export const createItemsTool = createTool({
   outputSchema: z.object({
     created: z.array(ItemSchema),
   }),
-  execute: async ({ context }) => {
+  execute: async (input) => {
     const now = new Date().toISOString();
-    const full: Item[] = context.items.map((g) =>
+    const full: Item[] = input.items.map((g) =>
       ItemSchema.parse({
         ...g,
         id: ulid(),
         related: [],
-        source: { sessionId: context.sessionId, createdAt: now, model: context.model },
+        source: { sessionId: input.sessionId, createdAt: now, model: input.model },
         stats: { attempts: 0, correct: 0 },
       }),
     );
@@ -97,8 +97,8 @@ export const updateItemTool = createTool({
   outputSchema: z.object({
     item: ItemSchema.nullable(),
   }),
-  execute: async ({ context }) => {
-    const item = await updateItem(context.id, context.patch as Partial<Item>);
+  execute: async (input) => {
+    const item = await updateItem(input.id, input.patch as Partial<Item>);
     return { item };
   },
 });

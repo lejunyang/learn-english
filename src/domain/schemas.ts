@@ -81,12 +81,16 @@ export const ItemSchema = z
 export type Item = z.infer<typeof ItemSchema>;
 
 // AI 生成时的精简 schema —— 不含 id/source/stats/related，由后端填充
+// scenario 也设为可选：调用方已指定场景，模型不必每条重复
 export const GeneratedItemSchema = ItemSchema.omit({
   id: true,
   source: true,
   stats: true,
   related: true,
-}).strict();
+  scenario: true,
+})
+  .extend({ scenario: z.enum(SCENARIOS).optional() })
+  .passthrough(); // 容忍模型偶尔多塞字段（id、fingerprint 等）
 export type GeneratedItem = z.infer<typeof GeneratedItemSchema>;
 
 // ============================================================

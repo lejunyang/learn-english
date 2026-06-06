@@ -9,6 +9,7 @@ const SYSTEM = `你是英语学习教练。用户刚答错一道题，请用中�
 风格自然、不啰嗦，不要 markdown 列表，写成流畅段落。`;
 
 export const learningCoach = new Agent({
+  id: 'learningCoach',
   name: 'learningCoach',
   description: '答错时给出简短中文讲解（流式）。',
   instructions: SYSTEM,

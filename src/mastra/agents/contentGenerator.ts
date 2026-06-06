@@ -36,6 +36,7 @@ const GenerationResultSchema = z.object({
 });
 
 const agent = new Agent({
+  id: 'contentGenerator',
   name: 'contentGenerator',
   description: '为指定场景批量生成英语学习题目（含 IPA、distractors、hints）。',
   instructions: SYSTEM,
@@ -62,13 +63,15 @@ export async function generateItems(opts: {
     : '';
 
   const prompt = `场景：${SCENARIO_LABELS[opts.scenario]}（${opts.scenario}）
-请生成 ${opts.count} 条题目，题型分布建议：${dist}。
-每条题目都按 schema 输出。${fpHint}`;
+请生成 ${opts.count} 条题目。
+
+**JSON 输出契约**：最外层是 \`{ "items": [...] }\`，items 是题目数组，每条题目按 schema 字段填写。**严禁**用 "questions" 等其他键名。
+
+题型分布建议：${dist}。${fpHint}`;
 
   const res = await agent.generate(prompt, {
-    output: GenerationResultSchema,
+    structuredOutput: { schema: GenerationResultSchema },
   });
-  // Mastra Agent 在使用 output 时，res.object 是已解析的对象
   const obj = (res as unknown as { object?: { items: GeneratedItem[] } }).object;
   const items = obj?.items ?? [];
   return { items, model: MODEL_IDS.generator };

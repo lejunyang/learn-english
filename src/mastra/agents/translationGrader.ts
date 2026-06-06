@@ -21,6 +21,7 @@ feedback：中文，2-4 句。先说对在哪、再说错在哪、给一句更�
 严格按 schema 输出，不要多余文字。`;
 
 const agent = new Agent({
+  id: 'translationGrader',
   name: 'translationGrader',
   description: '对用户的中→英翻译进行三维度评分并给出中文反馈。',
   instructions: SYSTEM,
@@ -38,8 +39,8 @@ export async function gradeTranslation(input: {
 用户译文：${input.userEn}
 参考译文：${input.referenceEn}
 
-请评分。`;
-  const res = await agent.generate(prompt, { output: TranslationGradeSchema });
+请评分，以 JSON 形式按 schema 输出。`;
+  const res = await agent.generate(prompt, { structuredOutput: { schema: TranslationGradeSchema } });
   const grade = (res as unknown as { object: TranslationGrade }).object;
   return { grade, model: MODEL_IDS.grader };
 }

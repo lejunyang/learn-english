@@ -25,11 +25,11 @@ export const getDueTool = createTool({
   outputSchema: z.object({
     itemIds: z.array(z.string()),
   }),
-  execute: async ({ context }) => {
+  execute: async (input) => {
     const [items, schedule] = await Promise.all([readAllItems(), readSchedule()]);
     const now = new Date();
     const candidates = items
-      .filter((it) => (context.scenario ? it.scenario === context.scenario : true))
+      .filter((it) => (input.scenario ? it.scenario === input.scenario : true))
       .map((it) => ({ it, sched: schedule[it.id] }))
       .filter((p): p is { it: typeof p.it; sched: ScheduleEntry } => !!p.sched && isDue(p.sched, now));
 
@@ -40,7 +40,7 @@ export const getDueTool = createTool({
       return (a.it.stats.lastScore ?? 0) - (b.it.stats.lastScore ?? 0);
     });
 
-    return { itemIds: candidates.slice(0, context.limit).map((c) => c.it.id) };
+    return { itemIds: candidates.slice(0, input.limit ?? 20).map((c) => c.it.id) };
   },
 });
 
@@ -57,11 +57,11 @@ export const recordReviewTool = createTool({
   outputSchema: z.object({
     schedule: ScheduleEntrySchema,
   }),
-  execute: async ({ context }) => {
+  execute: async (input) => {
     const map = await readSchedule();
-    const prev = map[context.itemId] ?? newEntry();
-    const next = applyReview(prev, context.score as ReviewScore);
-    await upsertScheduleEntry(context.itemId, next);
+    const prev = map[input.itemId] ?? newEntry();
+    const next = applyReview(prev, input.score as ReviewScore);
+    await upsertScheduleEntry(input.itemId, next);
     return { schedule: next };
   },
 });

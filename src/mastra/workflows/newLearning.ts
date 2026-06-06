@@ -40,6 +40,7 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
   const full: Item[] = deduped.map((g) =>
     ItemSchema.parse({
       ...g,
+      scenario: g.scenario ?? input.scenario, // 模型可能没填
       id: ulid(),
       related: [],
       source: { sessionId: input.sessionId, createdAt: now, model },
