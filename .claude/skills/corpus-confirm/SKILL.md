@@ -1,5 +1,6 @@
 ---
-description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeba 等启发式标注的语料）做语义复核，重新评估难度、场景、关键词，结果写入 aiConfirmed 字段
+name: corpus-confirm
+description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeba 等启发式标注的语料）做语义复核，重新评估难度、场景、关键词，结果写入 aiConfirmed 字段。由当前宿主 AI 自己判定，不调任何后端 agent，可在 Claude Code / Trae / Cursor 等环境复用。
 ---
 
 # corpus-confirm —— 通用 corpus 复核 skill

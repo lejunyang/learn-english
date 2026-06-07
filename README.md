@@ -67,7 +67,7 @@ Tatoeba 入库时是用关键词词表 + 词频做**启发式**估算（`estimat
 /corpus-confirm
 ```
 
-它会从 `data/corpus.jsonl` 取出尚未 `aiConfirmed` 的条目，让当前 AI 重新评估难度/场景/关键词，结果写回 `aiConfirmed`。详见 `.claude/commands/corpus-confirm.md`。
+它会从 `data/corpus.jsonl` 取出尚未 `aiConfirmed` 的条目，让当前 AI 重新评估难度/场景/关键词，结果写回 `aiConfirmed`。详见 `.claude/skills/corpus-confirm/SKILL.md`。
 
 读路径优先级是 `aiConfirmed > estimated > 顶层 legacy`，所以复核越多，题库质量越高。
 
@@ -118,9 +118,12 @@ data/
   mistakes.jsonl          错题本（翻译题低分自动追加）
   drafts/                 中途未结束会话的草稿（用于 resume）
   raw/                    ingest 用的原始下载文件（gitignored）
-.claude/commands/
-  ingest-corpus.md        触发 pnpm ingest:scenario
-  corpus-confirm.md       通用复核 skill（不调后端 agent，由宿主 AI 完成）
+.claude/
+  commands/
+    ingest-corpus.md      Claude Code 专用 slash 命令，触发 pnpm ingest:scenario
+  skills/
+    corpus-confirm/
+      SKILL.md            通用复核 skill（标准 Anthropic Skills 格式，可在 Trae/Cursor 等环境复用，不调后端 agent）
 ```
 
 ## 题型

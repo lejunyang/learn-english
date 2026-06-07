@@ -87,7 +87,7 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
 - → 旧 6 个保留在 `SCENARIOS` 元组里，但 `SCENARIO_INFO.group = 'misc'`，前端不展示，仅用于历史数据 zod 校验通过。
 - 之后的所有 ingest（含 AI 生成的）都不应该再写老的 6 个。
 
-**新增场景的步骤** 必须 4 处同步，见 `.claude/commands/corpus-confirm.md` 的「用户决定补充新场景时需要修改的地方」一节。
+**新增场景的步骤** 必须 4 处同步，见 `.claude/skills/corpus-confirm/SKILL.md` 的「用户决定补充新场景时需要修改的地方」一节。
 
 ### 2.6 difficulty 从 5 级到 10 级
 
