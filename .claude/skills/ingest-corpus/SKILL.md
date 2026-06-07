@@ -31,13 +31,6 @@ description: 为指定学习场景从零生成词典条目（dict）和句子语
 
 两者都遵循同一原则：**不在脚本内 spawn agent**，判定完全交给当前宿主 AI。
 
-## 与旧版 `/ingest-corpus`（已废弃）的区别
-
-旧版调用的是 `pnpm ingest:scenario <scene>`，那个脚本内部 `new Agent(...)` 并用 `.env` 的 `MODEL_GENERATOR` 自己生成，**不管你在哪个 AI agent 里触发它，最终干活的都是同一个被写死的模型**。本新版已完全重构：
-
-- 脚本只做 I/O（`plan` 查缺 + `write` 去重落盘）
-- **生成由当前宿主 AI 完成**，质量取决于宿主模型本身
-
 ## 调用方式
 
 ```
@@ -58,8 +51,6 @@ description: 为指定学习场景从零生成词典条目（dict）和句子语
 - 文化: `movies, idioms, festivals, memes`
 - 学术: `paper-writing, academic-talk, reading`
 - 旅行: `airport-hotel, directions, complaints`
-
-> **绝不要**使用 `workplace / computing / ai / travel / daily / food`。这些是历史兼容值。
 
 **如果你不确定某个场景的界定**（比如 `slack` 和 `biz-email` 的边界），直接 `Read src/domain/tags.ts` 里的 SCENARIO_KEYWORDS 和 SCENARIO_INFO 获得准确描述。
 

@@ -76,8 +76,6 @@ description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeb
 - 学术: `paper-writing, academic-talk, reading`
 - 旅行: `airport-hotel, directions, complaints`
 
-> **绝不要**使用 `workplace / computing / ai / travel / daily / food`。这些是历史兼容值，已不在前端展示，新数据写入会让 zod 通过但等于污染语料。
-
 **复核时应该参考 `SCENARIO_KEYWORDS` 来理解每个场景的内涵**（脚本不会把它喂给你；如果你不确定 `slack` 和 `biz-email` 的边界，请直接 `Read` 那个文件）。
 
 ## 当一个句子不属于任何已有场景
