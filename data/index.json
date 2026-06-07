@@ -256,5 +256,85 @@
     ],
     "scenario": "devops",
     "type": "en2cn"
+  },
+  "01KTG3QX3GD17WZQV3CY9MAGC8": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.338Z",
+    "fingerprint": "cn2en|车站站局驻地位置身分地位|station",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "cn2en"
+  },
+  "01KTG3QX3GJG3PWWWZEWTZXBBY": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.332Z",
+    "fingerprint": "cn2en|出租车出租汽车出租马车|cab",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "cn2en"
+  },
+  "01KTG3QX3GNGJ6JV7GWCWGTA38": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.325Z",
+    "fingerprint": "en2cn|subway|地铁地道",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "en2cn"
+  },
+  "01KTG3QX3GNHRY10XVXTWNAN5T": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.318Z",
+    "fingerprint": "en2cn|bus|公共汽车",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "en2cn"
+  },
+  "01KTG3QX3GR9Z9TWQQY74JVAA9": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.343Z",
+    "fingerprint": "cn2en|地下地铁地道秘密活动|underground",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "cn2en"
+  },
+  "01KTG3QX3GX5ZGJNK80WAA32PB": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.311Z",
+    "fingerprint": "en2cn|trains|火车",
+    "langTags": [
+      "word"
+    ],
+    "scenario": "transport",
+    "type": "en2cn"
+  },
+  "01KTG3QX3HKFZ7D65JDTXPADTH": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.349Z",
+    "fingerprint": "cloze|tomthebustothecity|takes",
+    "langTags": [
+      "sentence"
+    ],
+    "scenario": "transport",
+    "type": "cloze"
+  },
+  "01KTG3QX3HN6W7HYPKXRF8CWN6": {
+    "attempts": 0,
+    "due": "2026-06-07T03:59:04.354Z",
+    "fingerprint": "translate|我請他們再寄給我一張票|itoldthemtosendmeanotherticket",
+    "langTags": [
+      "sentence"
+    ],
+    "scenario": "transport",
+    "type": "translate"
   }
 }

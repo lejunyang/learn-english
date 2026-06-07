@@ -74,20 +74,25 @@ function qualityCn(s) {
 }
 
 function estimateDifficulty(en, dictIndex) {
+  // 用句中"已知 lemma 的上四分位数难度"（比 max 稳健，避免一个生僻专有名词把整句拉到 4）
   const tokens = en.toLowerCase().replace(/[^a-z'\s-]/g, ' ').split(/\s+/).filter((t) => t.length >= 3);
-  let max = 0;
+  const diffs = [];
   for (const t of tokens) {
     const d = dictIndex.get(t);
-    if (d && d.difficulty > max) max = d.difficulty;
+    if (d) diffs.push(d.difficulty);
   }
-  if (max === 0) {
+  if (diffs.length === 0) {
+    // 全是专有名词/字典外词 → 按句长粗估
     const w = en.trim().split(/\s+/).length;
     if (w <= 8) return 1;
     if (w <= 14) return 2;
     if (w <= 20) return 3;
     return 4;
   }
-  return max;
+  diffs.sort((a, b) => a - b);
+  // 上四分位数，截断到 1-5
+  const q = diffs[Math.floor(diffs.length * 0.75)] || 1;
+  return Math.max(1, Math.min(5, q));
 }
 
 function extractKeywords(en, dictIndex) {
