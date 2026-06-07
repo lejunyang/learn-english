@@ -21,7 +21,7 @@ const SYSTEM = `你是一个英语学习题目生成助手。
 1. hints.weak = 弱提示（类别/词性/首字母/中文释义大类）；hints.strong = 强提示（接近答案但不直给）。
 2. 单词或短语题（answer.en 为 ≤3 个英文 token）必须填写 phonetics.ipa（IPA 国际音标，含 / /）；句子题留空。
 3. 每题打 langTags（自由词表，建议参考：${SUGGESTED_LANG_TAGS.join(', ')}）。
-4. difficulty: 1=基础常用, 3=中等, 5=罕见/复杂。按场景受众估计。
+4. difficulty: 1=基础常用, 5=中等, 10=罕见/复杂。按场景受众估计（10 级粒度，1 最简单，10 最难）。
 5. 不要重复已有指纹列出的题目（同 prompt+answer 视为重复）。
 
 **distractors（迷惑选项）质量铁律 —— 极其重要**：

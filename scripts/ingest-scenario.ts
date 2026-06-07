@@ -53,7 +53,7 @@ const PayloadSchema = z.object({
         ipa: z.string().optional(),
         pos: z.string().optional(),
         cefr: z.string().optional(),
-        difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+        difficulty: z.number().int().min(1).max(10),
         cn: z.array(z.string()).min(1),
         definition: z.string().optional(),
         examples: z
@@ -68,7 +68,7 @@ const PayloadSchema = z.object({
         en: z.string(),
         cn: z.string().optional(),
         keywords: z.array(z.string()).default([]),
-        difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+        difficulty: z.number().int().min(1).max(10),
       }),
     )
     .default([]),
@@ -87,7 +87,7 @@ const agent = new Agent({
 - ipa: 国际音标（含 / /）
 - pos: 词性 (n. / v. / adj. ...)
 - cefr: A1/A2/B1/B2/C1/C2
-- difficulty: 1=入门 ~ 5=高级
+- difficulty: 1=入门 ~ 10=高级（10 级粒度，1 最简单，10 最难）
 - cn: 中文释义数组（同一 sense 的多个译法）
 - definition: 简洁英文释义
 - examples: 1-2 条 { en, cn } 例句
@@ -96,7 +96,7 @@ const agent = new Agent({
 - en: 英文句子
 - cn: 中文翻译
 - keywords: 句中可挖空的关键词/短语（1-3 个）
-- difficulty: 1-5
+- difficulty: 1-10
 
 **质量要求**：
 1. 紧扣指定场景，不出泛泛通用句
@@ -189,9 +189,17 @@ async function main() {
         id: ulid(),
         en: c.en,
         cn: c.cn,
-        keywords: c.keywords,
-        scenarios: finalScenarios,
-        difficulty: c.difficulty,
+        // 顶层 legacy 字段留空，估算值与权威值都放到 aiConfirmed（这是 AI 直接生成的）
+        keywords: [],
+        scenarios: [],
+        difficulty: 1,
+        aiConfirmed: {
+          difficulty: c.difficulty,
+          scenarios: finalScenarios,
+          keywords: c.keywords,
+          confirmedAt: new Date().toISOString(),
+          model: MODEL_ARG,
+        },
         source: `ai-generated:${MODEL_ARG}:${new Date().toISOString().slice(0, 10)}`,
       }),
     );

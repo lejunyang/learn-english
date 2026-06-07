@@ -13,6 +13,7 @@ import {
 import { newEntry } from '../../domain/fsrs.js';
 import {
   ItemSchema,
+  effectiveCorpus,
   type Item,
   type Scenario,
   type DictEntry,
@@ -296,10 +297,10 @@ function pickDistractors(
 ): string[] {
   const seen = new Set<string>();
   const excludeKey = (type === 'en2cn' ? exclude.senses[0]?.cn[0] : exclude.lemma)?.toLowerCase() ?? '';
-  // 同 pool 取相近难度
+  // 同 pool 取相近难度（10 级粒度下放宽到 ±2）
   const candidates = pool.filter(
     (d) => d.lemma.toLowerCase() !== exclude.lemma.toLowerCase() &&
-      Math.abs(d.difficulty - exclude.difficulty) <= 1,
+      Math.abs(d.difficulty - exclude.difficulty) <= 2,
   );
   const shuffled = shuffle(candidates);
   const out: string[] = [];
@@ -321,9 +322,10 @@ function corpusToCloze(
   dictPool: DictEntry[],
   opts: { scenario: Scenario; sessionId: string },
 ): Item | null {
-  if (!c.keywords || c.keywords.length === 0) return null;
+  const eff = effectiveCorpus(c);
+  if (!eff.keywords || eff.keywords.length === 0) return null;
   // 选第一个 keyword 挖空
-  const target = c.keywords[0];
+  const target = eff.keywords[0];
   if (!target) return null;
   // 必须在句子里能找到
   const re = new RegExp(`\\b${escapeRegex(target)}\\b`, 'i');
@@ -338,7 +340,7 @@ function corpusToCloze(
     type: 'cloze',
     scenario: opts.scenario,
     langTags: ['sentence'],
-    difficulty: c.difficulty,
+    difficulty: eff.difficulty,
     prompt: { cloze },
     answer: { en: target },
     distractors,
@@ -378,11 +380,12 @@ function pickDistractorsForCloze(dictPool: DictEntry[], target: string, n: numbe
 // corpus → translate Item
 function corpusToTranslate(c: CorpusEntry, opts: { scenario: Scenario; sessionId: string }): Item | null {
   if (!c.cn) return null;
+  const eff = effectiveCorpus(c);
   const draft: GeneratedItem = {
     type: 'translate',
     scenario: opts.scenario,
     langTags: ['sentence'],
-    difficulty: c.difficulty,
+    difficulty: eff.difficulty,
     prompt: { cn: c.cn },
     answer: { en: c.en },
     hints: {

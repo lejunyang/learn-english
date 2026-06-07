@@ -10,6 +10,7 @@ import {
   MistakeSchema,
   DictEntrySchema,
   CorpusEntrySchema,
+  effectiveCorpus,
   type Item,
   type ScheduleMap,
   type ScheduleEntry,
@@ -415,8 +416,9 @@ export async function pickCorpusBy(opts: {
   const limit = opts.limit ?? Infinity;
   const out: CorpusEntry[] = [];
   for (const e of all) {
-    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) continue;
-    if (opts.scenario && !e.scenarios.includes(opts.scenario)) continue;
+    const eff = effectiveCorpus(e);
+    if (opts.difficulty && !opts.difficulty.includes(eff.difficulty)) continue;
+    if (opts.scenario && !eff.scenarios.includes(opts.scenario)) continue;
     out.push(e);
     if (out.length >= limit) break;
   }

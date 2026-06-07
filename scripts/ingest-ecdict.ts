@@ -17,35 +17,35 @@ import { DICT_FILE, readAllDict } from '../src/domain/store.js';
 
 const SRC = path.resolve('data/raw/ecdict.csv');
 
-// tag → difficulty 映射（多个 tag 取最简单的难度）
-const TAG_DIFFICULTY: Record<string, 1 | 2 | 3 | 4 | 5> = {
-  zk: 1, // 中考
-  gk: 2, // 高考
-  cet4: 2,
-  cet6: 3,
-  ky: 4, // 考研
-  toefl: 4,
-  ielts: 4,
-  gre: 5,
+// tag → difficulty 映射（1..10；多个 tag 取最简单的难度）
+const TAG_DIFFICULTY: Record<string, number> = {
+  zk: 1,    // 中考
+  gk: 3,    // 高考
+  cet4: 3,
+  cet6: 5,
+  ky: 7,    // 考研
+  toefl: 7,
+  ielts: 7,
+  gre: 9,
 };
 
-function inferDifficulty(tag: string, frq: number): 1 | 2 | 3 | 4 | 5 {
+function inferDifficulty(tag: string, frq: number): number {
   const tags = tag.split(/\s+/).filter(Boolean);
   if (tags.length) {
-    let min = 5;
+    let min = 10;
     for (const t of tags) {
       const d = TAG_DIFFICULTY[t];
       if (d !== undefined && d < min) min = d;
     }
-    return min as 1 | 2 | 3 | 4 | 5;
+    return min;
   }
   // 没有 tag：按 frq（COCA 频率）粗估
-  if (!frq || frq === 0) return 4;
-  if (frq <= 2000) return 1;
-  if (frq <= 5000) return 2;
-  if (frq <= 15000) return 3;
-  if (frq <= 40000) return 4;
-  return 5;
+  if (!frq || frq === 0) return 7;
+  if (frq <= 2000) return 2;
+  if (frq <= 5000) return 3;
+  if (frq <= 15000) return 5;
+  if (frq <= 40000) return 7;
+  return 9;
 }
 
 // 解析 translation 字段：按 \n 分行，每行尽量提取 pos 与中文

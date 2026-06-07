@@ -73,13 +73,17 @@ export const ItemSourceSchema = z
   })
   .strict();
 
+export const DIFFICULTY_MIN = 1;
+export const DIFFICULTY_MAX = 10;
+const DifficultySchema = z.number().int().min(DIFFICULTY_MIN).max(DIFFICULTY_MAX);
+
 export const ItemSchema = z
   .object({
     id: z.string(), // ulid
     type: z.enum(ITEM_TYPES),
     scenario: z.enum(SCENARIOS),
     langTags: z.array(z.string()).default([]),
-    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    difficulty: DifficultySchema,
 
     prompt: PromptSchema,
     answer: AnswerSchema,
@@ -256,7 +260,7 @@ export const DictEntrySchema = z
     tags: z.array(z.string()).default([]), // cet4/cet6/ky/toefl/ielts/gre/zk/gk
     frq: z.number().int().optional(), // COCA 频率排名 (越小越高频)
     bnc: z.number().int().optional(),
-    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    difficulty: DifficultySchema,
     senses: z.array(DictSenseSchema).default([]),
     exchange: z.string().optional(), // ECDICT 词形变化原文
     source: z.string(), // ecdict / oxford / ai-generated:xxx
@@ -264,16 +268,50 @@ export const DictEntrySchema = z
   .passthrough();
 export type DictEntry = z.infer<typeof DictEntrySchema>;
 
+// CorpusEntry 评估字段：difficulty / scenarios / keywords
+// 拆成 estimated（启发式/规则估计）和 aiConfirmed（AI 复核后写回）两层。
+// 读路径优先级：aiConfirmed > estimated > 顶层 legacy 字段
+export const CorpusJudgementSchema = z
+  .object({
+    difficulty: DifficultySchema.optional(),
+    scenarios: z.array(z.enum(SCENARIOS)).optional(),
+    keywords: z.array(z.string()).optional(),
+    confirmedAt: z.string().optional(), // ISO，仅 aiConfirmed 用
+    model: z.string().optional(),       // 仅 aiConfirmed 用
+  })
+  .passthrough();
+export type CorpusJudgement = z.infer<typeof CorpusJudgementSchema>;
+
 export const CorpusEntrySchema = z
   .object({
     id: z.string(), // ulid
     en: z.string(),
     cn: z.string().optional(), // 中文翻译（可能没有）
-    keywords: z.array(z.string()).default([]), // 可挖空的关键词/短语
+    // 顶层 keywords/scenarios/difficulty 保留为向后兼容老数据，新增数据建议写进 estimated
+    keywords: z.array(z.string()).default([]),
     scenarios: z.array(z.enum(SCENARIOS)).default([]),
-    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    difficulty: DifficultySchema,
+    estimated: CorpusJudgementSchema.optional(),
+    aiConfirmed: CorpusJudgementSchema.optional(),
     cefr: z.string().optional(),
     source: z.string(),
   })
   .passthrough();
 export type CorpusEntry = z.infer<typeof CorpusEntrySchema>;
+
+/**
+ * 取得 corpus entry 的有效字段：优先 aiConfirmed → estimated → 顶层 legacy。
+ */
+export function effectiveCorpus(c: CorpusEntry): {
+  difficulty: number;
+  scenarios: Scenario[];
+  keywords: string[];
+} {
+  const ai = c.aiConfirmed ?? {};
+  const est = c.estimated ?? {};
+  return {
+    difficulty: ai.difficulty ?? est.difficulty ?? c.difficulty,
+    scenarios: (ai.scenarios ?? est.scenarios ?? c.scenarios) as Scenario[],
+    keywords: ai.keywords ?? est.keywords ?? c.keywords,
+  };
+}

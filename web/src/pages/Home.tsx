@@ -4,9 +4,9 @@ import { api } from '../api';
 
 const MINUTES = [5, 10, 15, 20, 30];
 const EFFORTS: Array<{ id: 'low' | 'medium' | 'high'; label: string; hint: string }> = [
-  { id: 'low', label: '轻松', hint: '少量题，速度优先' },
-  { id: 'medium', label: '常规', hint: '默认' },
-  { id: 'high', label: '深入', hint: '更多题、更细致' },
+  { id: 'low', label: '低', hint: '模型 effort 低：少量题，速度优先' },
+  { id: 'medium', label: '中', hint: '模型 effort 中（默认）' },
+  { id: 'high', label: '高', hint: '模型 effort 高：更多题、更细致' },
 ];
 
 interface ScenarioGroup {
@@ -177,7 +177,7 @@ export function Home() {
 
         {/* effort */}
         <div>
-          <div className="text-sm text-slate-600 mb-2">深入程度</div>
+          <div className="text-sm text-slate-600 mb-2">模型 effort</div>
           <div className="grid grid-cols-3 gap-2">
             {EFFORTS.map((e) => (
               <button

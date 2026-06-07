@@ -9,9 +9,12 @@ import { createInterface } from 'node:readline';
 import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 import { ulid } from 'ulid';
+import { Converter } from 'opencc-js';
 import { CorpusEntrySchema, type CorpusEntry } from '../src/domain/schemas.js';
 import { classifyScenarios } from '../src/domain/tags.js';
 import { CORPUS_FILE, readAllCorpus } from '../src/domain/store.js';
+
+const t2s = Converter({ from: 'tw', to: 'cn' });
 
 const RAW = path.resolve('data/raw');
 const CMN_TSV = path.join(RAW, 'cmn_sentences.tsv');
@@ -74,25 +77,26 @@ function qualityCn(s) {
 }
 
 function estimateDifficulty(en, dictIndex) {
-  // 用句中"已知 lemma 的上四分位数难度"（比 max 稳健，避免一个生僻专有名词把整句拉到 4）
+  // 输出 1..10。以"句中已知 lemma 的上四分位数难度（1..5）"为基础，
+  // 再叠加句长 +1 偏置，最后线性映射到 1..10。
   const tokens = en.toLowerCase().replace(/[^a-z'\s-]/g, ' ').split(/\s+/).filter((t) => t.length >= 3);
+  const w = en.trim().split(/\s+/).length;
+  const lenBias = w <= 8 ? 0 : w <= 14 ? 1 : w <= 20 ? 2 : 3;
   const diffs = [];
   for (const t of tokens) {
     const d = dictIndex.get(t);
     if (d) diffs.push(d.difficulty);
   }
+  let base; // 1..5
   if (diffs.length === 0) {
-    // 全是专有名词/字典外词 → 按句长粗估
-    const w = en.trim().split(/\s+/).length;
-    if (w <= 8) return 1;
-    if (w <= 14) return 2;
-    if (w <= 20) return 3;
-    return 4;
+    base = Math.min(4, 1 + lenBias);
+  } else {
+    diffs.sort((a, b) => a - b);
+    base = diffs[Math.floor(diffs.length * 0.75)] || 1;
   }
-  diffs.sort((a, b) => a - b);
-  // 上四分位数，截断到 1-5
-  const q = diffs[Math.floor(diffs.length * 0.75)] || 1;
-  return Math.max(1, Math.min(5, q));
+  // 1..5 -> 1..10 线性 ((b-1)*9/4)+1，再 + lenBias/2 微调
+  const scaled = Math.round(((base - 1) * 9) / 4 + 1 + lenBias * 0.5);
+  return Math.max(1, Math.min(10, scaled));
 }
 
 function extractKeywords(en, dictIndex) {
@@ -163,8 +167,10 @@ async function main() {
   let batch = [];
 
   for (const [cmnId, engIds] of links) {
-    const cn = cmn.get(cmnId);
-    if (!cn || !qualityCn(cn)) { skipBadCn++; continue; }
+    const cnRaw = cmn.get(cmnId);
+    if (!cnRaw) { skipBadCn++; continue; }
+    const cn = t2s(cnRaw);
+    if (!qualityCn(cn)) { skipBadCn++; continue; }
 
     let picked = null;
     for (const eid of engIds) {
@@ -185,9 +191,11 @@ async function main() {
       id: ulid(),
       en: picked,
       cn,
-      keywords,
-      scenarios,
-      difficulty,
+      // 顶层留空数组/最低难度占位；真值放到 estimated，由后续 skill 复核回填 aiConfirmed
+      keywords: [],
+      scenarios: [],
+      difficulty: 1,
+      estimated: { difficulty, scenarios, keywords },
       source: 'tatoeba',
     });
     batch.push(entry);
