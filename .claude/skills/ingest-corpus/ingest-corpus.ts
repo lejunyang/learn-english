@@ -3,24 +3,24 @@
  *
  * 两个子命令：
  *
- *   plan <scenario> [--count N] [--file-dict <path>] [--file-corpus <path>]
+ *   plan <scenario> [--count N]
  *     → 输出 JSON 到 stdout，告诉宿主 AI：
  *        - 该场景的 label/英中关键词提示
  *        - 期望生成多少 dict / corpus 条
- *        - 已存在的 lemma 与 en 指纹（避免重复）
+ *        - 已存在的 lemma 与 en 指纹（抽样，避免重复）
  *        - 允许的 scenarios 列表
  *
- *   write --input <results.json> [--file-dict <path>] [--file-corpus <path>]
+ *   write --input <results.json>
  *     → 接受 AI 生成的 {dictEntries:[...], corpusEntries:[...]}，去重 + zod 校验 + 落盘
- *        dict 追加到 data/dict.jsonl
- *        corpus 追加到 data/corpus.jsonl，{difficulty,scenarios,keywords} 写到 aiConfirmed
+ *        dict 追加到 data/dict/d{N}.jsonl（按 effectiveDict.difficulty 分片）
+ *        corpus 追加到 data/corpus/d{N}.jsonl（按 effectiveCorpus.difficulty 分片）
+ *        difficulty/scenarios 写到 aiConfirmed
  *
  * 不调用任何 LLM —— 生成完全由宿主 AI（执行本 skill 的当前对话）负责。
  *
- * 该脚本依赖项目内的 zod schema（src/domain/schemas.ts、src/domain/tags.ts）。
- * 移植到其它项目时可以：
- *   (a) 复制 schemas/tags 这两个文件过去，或
- *   (b) 把下面的 *.parse(...) 改成手写 JSON 校验，保留字段语义一致即可。
+ * 该脚本依赖项目内的 zod schema + store 分片读写
+ * （src/domain/schemas.ts, src/domain/store.ts, src/domain/tags.ts）。
+ * 移植到其它项目时把 store / schemas / tags 三个文件一并复制即可。
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -38,18 +38,21 @@ import {
   SCENARIO_KEYWORDS,
   classifyScenarios,
 } from '../../../src/domain/tags.js';
+import {
+  appendDict,
+  appendCorpus,
+  readAllDict,
+  readAllCorpus,
+} from '../../../src/domain/store.js';
 
-const DEFAULT_DICT_FILE = path.resolve('data/dict.jsonl');
-const DEFAULT_CORPUS_FILE = path.resolve('data/corpus.jsonl');
 const DEFAULT_COUNT = 30;
 const DICT_RATIO = 0.6; // 60% dict / 40% corpus
+const SAMPLE_K = 50;
 
 interface Args {
   cmd: 'plan' | 'write';
   scenario?: string;
   count: number;
-  dictFile: string;
-  corpusFile: string;
   input?: string;
 }
 
@@ -58,16 +61,11 @@ function parseArgs(): Args {
   const cmd = argv[0] as Args['cmd'];
   if (!cmd || !['plan', 'write'].includes(cmd)) {
     console.error('usage:');
-    console.error('  ingest-corpus plan <scenario> [--count N] [--file-dict <path>] [--file-corpus <path>]');
-    console.error('  ingest-corpus write --input <results.json> [--file-dict <path>] [--file-corpus <path>]');
+    console.error('  ingest-corpus plan <scenario> [--count N]');
+    console.error('  ingest-corpus write --input <results.json>');
     process.exit(2);
   }
-  const out: Args = {
-    cmd,
-    count: DEFAULT_COUNT,
-    dictFile: DEFAULT_DICT_FILE,
-    corpusFile: DEFAULT_CORPUS_FILE,
-  };
+  const out: Args = { cmd, count: DEFAULT_COUNT };
   let i = 1;
   if (cmd === 'plan') {
     if (!argv[1] || argv[1].startsWith('--')) {
@@ -80,79 +78,13 @@ function parseArgs(): Args {
   for (; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--count') out.count = parseInt(argv[++i] ?? '', 10) || DEFAULT_COUNT;
-    else if (a === '--file-dict') out.dictFile = path.resolve(argv[++i] ?? DEFAULT_DICT_FILE);
-    else if (a === '--file-corpus') out.corpusFile = path.resolve(argv[++i] ?? DEFAULT_CORPUS_FILE);
     else if (a === '--input') out.input = argv[++i];
   }
   return out;
 }
 
-async function readLines(file: string): Promise<string[]> {
-  try {
-    const text = await fs.readFile(file, 'utf8');
-    return text.split('\n').filter((l) => l.trim().length > 0);
-  } catch (e: any) {
-    if (e?.code === 'ENOENT') return [];
-    throw e;
-  }
-}
-
-function safeParse(line: string): any | null {
-  try { return JSON.parse(line); } catch { return null; }
-}
-
 function normalizeEnKey(en: string): string {
   return en.toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-// ─────────────────────────── plan ───────────────────────────
-
-async function cmdPlan(args: Args) {
-  const scenario = args.scenario!;
-  if (!(SCENARIOS as readonly string[]).includes(scenario)) {
-    console.error(`unknown scenario: ${scenario}`);
-    console.error('  allowed:', allowedScenarios().join(', '));
-    process.exit(1);
-  }
-  const dictCount = Math.round(args.count * DICT_RATIO);
-  const corpusCount = args.count - dictCount;
-
-  const dictLines = await readLines(args.dictFile);
-  const corpusLines = await readLines(args.corpusFile);
-
-  const existingLemmas: string[] = [];
-  for (const l of dictLines) {
-    const e = safeParse(l);
-    if (e?.lemma) existingLemmas.push(String(e.lemma).toLowerCase());
-  }
-  const existingEnKeys: string[] = [];
-  for (const l of corpusLines) {
-    const e = safeParse(l);
-    if (e?.en) existingEnKeys.push(normalizeEnKey(e.en));
-  }
-
-  // 抽样：随机取 50 条让 AI 避免重复，避免提示词太大
-  const sampleLemmas = sampleK(existingLemmas, 50);
-  const sampleEn = sampleK(existingEnKeys, 50);
-
-  const info = SCENARIO_INFO[scenario as Scenario];
-  const kws = SCENARIO_KEYWORDS[scenario as Scenario];
-
-  const plan = {
-    scenario,
-    label: info?.label,
-    group: info?.group,
-    hint: info?.hint,
-    keywordsHint: { en: kws?.en ?? [], cn: kws?.cn ?? [] },
-    dictCount,
-    corpusCount,
-    existingLemmasCount: existingLemmas.length,
-    existingCorpusCount: existingEnKeys.length,
-    sampleExistingLemmas: sampleLemmas,
-    sampleExistingEnKeys: sampleEn,
-    allowedScenarios: allowedScenarios(),
-  };
-  process.stdout.write(JSON.stringify(plan, null, 2));
 }
 
 function allowedScenarios(): string[] {
@@ -167,10 +99,48 @@ function sampleK<T>(arr: T[], k: number): T[] {
   return Array.from(out).map((i) => arr[i] as T);
 }
 
+// ─────────────────────────── plan ───────────────────────────
+
+async function cmdPlan(args: Args) {
+  const scenario = args.scenario!;
+  if (!(SCENARIOS as readonly string[]).includes(scenario)) {
+    console.error(`unknown scenario: ${scenario}`);
+    console.error('  allowed:', allowedScenarios().join(', '));
+    process.exit(1);
+  }
+  const dictCount = Math.round(args.count * DICT_RATIO);
+  const corpusCount = args.count - dictCount;
+
+  const existingDict = await readAllDict();
+  const existingCorpus = await readAllCorpus();
+
+  const existingLemmas = existingDict.map((d) => d.lemma.toLowerCase());
+  const existingEnKeys = existingCorpus.map((c) => normalizeEnKey(c.en));
+
+  const info = SCENARIO_INFO[scenario as Scenario];
+  const kws = SCENARIO_KEYWORDS[scenario as Scenario];
+
+  const plan = {
+    scenario,
+    label: info?.label,
+    group: info?.group,
+    hint: info?.hint,
+    keywordsHint: { en: kws?.en ?? [], cn: kws?.cn ?? [] },
+    dictCount,
+    corpusCount,
+    existingLemmasCount: existingLemmas.length,
+    existingCorpusCount: existingEnKeys.length,
+    sampleExistingLemmas: sampleK(existingLemmas, SAMPLE_K),
+    sampleExistingEnKeys: sampleK(existingEnKeys, SAMPLE_K),
+    allowedScenarios: allowedScenarios(),
+  };
+  process.stdout.write(JSON.stringify(plan, null, 2));
+}
+
 // ─────────────────────────── write ──────────────────────────
 
 interface WriteInput {
-  scenario?: string;        // 可选，缺省时不强制把 scenario 加进 dict/corpus 的 scenarios
+  scenario?: string;        // 可选；写到 dict/corpus 的 scenarios 中
   model?: string;           // 写到 source 与 aiConfirmed.model
   dictEntries?: Array<{
     lemma: string;
@@ -203,19 +173,11 @@ async function cmdWrite(args: Args) {
   const dateTag = new Date().toISOString().slice(0, 10);
   const source = `ai-generated:${model}:${dateTag}`;
 
-  // 已有指纹
-  const dictLines = await readLines(args.dictFile);
-  const corpusLines = await readLines(args.corpusFile);
-  const dictExisting = new Set<string>();
-  for (const l of dictLines) {
-    const e = safeParse(l);
-    if (e?.lemma) dictExisting.add(String(e.lemma).toLowerCase());
-  }
-  const corpusExisting = new Set<string>();
-  for (const l of corpusLines) {
-    const e = safeParse(l);
-    if (e?.en) corpusExisting.add(normalizeEnKey(e.en));
-  }
+  // 已有指纹（跨所有分片）
+  const existingDict = await readAllDict();
+  const existingCorpus = await readAllCorpus();
+  const dictExisting = new Set<string>(existingDict.map((d) => d.lemma.toLowerCase()));
+  const corpusExisting = new Set<string>(existingCorpus.map((c) => normalizeEnKey(c.en)));
 
   // dict
   const newDict: DictEntry[] = [];
@@ -228,7 +190,7 @@ async function cmdWrite(args: Args) {
     const finalScenarios = Array.from(new Set([
       ...(scenario ? [scenario] : []),
       ...sceneFromWord,
-    ]));
+    ])) as Scenario[];
     try {
       newDict.push(
         DictEntrySchema.parse({
@@ -236,7 +198,6 @@ async function cmdWrite(args: Args) {
           ipa: d.ipa ? { any: d.ipa } : undefined,
           pos: d.pos ? [d.pos] : [],
           cefr: d.cefr,
-          difficulty: d.difficulty,
           senses: [
             {
               pos: d.pos,
@@ -246,6 +207,12 @@ async function cmdWrite(args: Args) {
               examples: d.examples ?? [],
             },
           ],
+          aiConfirmed: {
+            difficulty: d.difficulty,
+            scenarios: finalScenarios,
+            confirmedAt: new Date().toISOString(),
+            model,
+          },
           source,
         }),
       );
@@ -254,7 +221,7 @@ async function cmdWrite(args: Args) {
     }
   }
 
-  // corpus —— 写入 aiConfirmed（顶层 legacy 字段留空占位）
+  // corpus
   const newCorpus: CorpusEntry[] = [];
   let corpusDup = 0;
   const now = new Date().toISOString();
@@ -268,16 +235,13 @@ async function cmdWrite(args: Args) {
       ...(scenario ? [scenario] : []),
       ...explicit,
       ...sceneFromSent,
-    ]));
+    ])) as Scenario[];
     try {
       newCorpus.push(
         CorpusEntrySchema.parse({
           id: ulid(),
           en: c.en,
           cn: c.cn,
-          keywords: [],
-          scenarios: [],
-          difficulty: 1,
           aiConfirmed: {
             difficulty: c.difficulty,
             scenarios: finalScenarios,
@@ -293,14 +257,8 @@ async function cmdWrite(args: Args) {
     }
   }
 
-  if (newDict.length) {
-    const text = newDict.map((e) => JSON.stringify(e)).join('\n') + '\n';
-    await fs.appendFile(args.dictFile, text, 'utf8');
-  }
-  if (newCorpus.length) {
-    const text = newCorpus.map((e) => JSON.stringify(e)).join('\n') + '\n';
-    await fs.appendFile(args.corpusFile, text, 'utf8');
-  }
+  await appendDict(newDict);
+  await appendCorpus(newCorpus);
 
   const summary = {
     dictWritten: newDict.length,

@@ -11,6 +11,9 @@ import {
   DictEntrySchema,
   CorpusEntrySchema,
   effectiveCorpus,
+  effectiveDict,
+  DIFFICULTY_MIN,
+  DIFFICULTY_MAX,
   type Item,
   type ScheduleMap,
   type ScheduleEntry,
@@ -38,13 +41,36 @@ export const ITEMS_FILE = path.join(DATA_DIR, 'items.jsonl');
 export const SCHEDULE_FILE = path.join(DATA_DIR, 'schedule.json');
 export const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 export const MISTAKES_FILE = path.join(DATA_DIR, 'mistakes.jsonl');
-export const DICT_FILE = path.join(DATA_DIR, 'dict.jsonl');
-export const CORPUS_FILE = path.join(DATA_DIR, 'corpus.jsonl');
+// dict / corpus 按 difficulty 分片：data/dict/d1.jsonl..d10.jsonl, data/corpus/d1.jsonl..d10.jsonl
+export const DICT_DIR = path.join(DATA_DIR, 'dict');
+export const CORPUS_DIR = path.join(DATA_DIR, 'corpus');
 export const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 export const DRAFTS_DIR = path.join(DATA_DIR, 'drafts');
 
+function clampDifficulty(d: number | undefined): number {
+  if (typeof d !== 'number' || !Number.isFinite(d)) return DIFFICULTY_MIN;
+  return Math.max(DIFFICULTY_MIN, Math.min(DIFFICULTY_MAX, Math.round(d)));
+}
+
+export function dictShardFile(difficulty: number): string {
+  return path.join(DICT_DIR, `d${clampDifficulty(difficulty)}.jsonl`);
+}
+export function corpusShardFile(difficulty: number): string {
+  return path.join(CORPUS_DIR, `d${clampDifficulty(difficulty)}.jsonl`);
+}
+
+function allShards(dir: string): string[] {
+  const out: string[] = [];
+  for (let i = DIFFICULTY_MIN; i <= DIFFICULTY_MAX; i++) {
+    out.push(path.join(dir, `d${i}.jsonl`));
+  }
+  return out;
+}
+
 async function ensureDirs(): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(DICT_DIR, { recursive: true });
+  await fs.mkdir(CORPUS_DIR, { recursive: true });
   await fs.mkdir(SESSIONS_DIR, { recursive: true });
   await fs.mkdir(DRAFTS_DIR, { recursive: true });
 }
@@ -305,20 +331,20 @@ export async function resolveMistakesForItem(itemId: string): Promise<number> {
 }
 
 // ============================================================
-// Dictionary (JSONL, lemma 唯一)
+// Dictionary (按 difficulty 分片 JSONL)
 // ============================================================
 
-export async function readAllDict(): Promise<DictEntry[]> {
+async function readShard<T>(file: string, parse: (raw: unknown) => T): Promise<T[]> {
   try {
-    const text = await fs.readFile(DICT_FILE, 'utf8');
+    const text = await fs.readFile(file, 'utf8');
     return text
       .split('\n')
       .filter((l) => l.trim().length > 0)
       .map((line, idx) => {
         try {
-          return DictEntrySchema.parse(JSON.parse(line));
+          return parse(JSON.parse(line));
         } catch (err) {
-          throw new Error(`Invalid dict at line ${idx + 1}: ${(err as Error).message}`);
+          throw new Error(`Invalid ${path.basename(file)} at line ${idx + 1}: ${(err as Error).message}`);
         }
       });
   } catch (e: any) {
@@ -327,11 +353,40 @@ export async function readAllDict(): Promise<DictEntry[]> {
   }
 }
 
+/** 仅读指定 difficulty 子集的分片；不传则全读 d1..d10 */
+async function readDictShards(difficulties?: number[]): Promise<DictEntry[]> {
+  const targets = (difficulties && difficulties.length
+    ? difficulties.map(clampDifficulty)
+    : Array.from({ length: DIFFICULTY_MAX - DIFFICULTY_MIN + 1 }, (_, i) => i + DIFFICULTY_MIN))
+    .map((d) => path.join(DICT_DIR, `d${d}.jsonl`));
+  const out: DictEntry[] = [];
+  for (const f of targets) {
+    out.push(...(await readShard(f, (r) => DictEntrySchema.parse(r))));
+  }
+  return out;
+}
+
+export async function readAllDict(): Promise<DictEntry[]> {
+  return readDictShards();
+}
+
+/** 按 effectiveDict.difficulty 分片 append。已有分片就 append；不存在则创建。 */
 export async function appendDict(entries: DictEntry[]): Promise<void> {
   if (entries.length === 0) return;
   await ensureDirs();
-  const text = entries.map((e) => JSON.stringify(DictEntrySchema.parse(e))).join('\n') + '\n';
-  await fs.appendFile(DICT_FILE, text, 'utf8');
+  const byShard = new Map<string, DictEntry[]>();
+  for (const e of entries) {
+    const parsed = DictEntrySchema.parse(e);
+    const d = clampDifficulty(effectiveDict(parsed).difficulty);
+    const file = dictShardFile(d);
+    const arr = byShard.get(file) ?? [];
+    arr.push(parsed);
+    byShard.set(file, arr);
+  }
+  for (const [file, arr] of byShard) {
+    const text = arr.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    await fs.appendFile(file, text, 'utf8');
+  }
 }
 
 /**
@@ -347,6 +402,8 @@ export async function buildDictIndex(): Promise<Map<string, DictEntry>> {
  * 按场景 + 难度过滤 dict 条目（候选池）。
  * 默认只取有学术 tag（cet4/cet6/ky/toefl/ielts/gre/zk/gk）的词条，
  * 这些是经过筛选的高质量词汇；按 difficulty 升序（先易后难）。
+ *
+ * 若指定 difficulty，只读对应分片以加速。
  */
 export async function pickDictBy(opts: {
   scenario?: Scenario;
@@ -355,20 +412,19 @@ export async function pickDictBy(opts: {
   /** 是否仅取带学术 tag 的词条（默认 true）。设为 false 则不过滤 */
   taggedOnly?: boolean;
 }): Promise<DictEntry[]> {
-  const all = await readAllDict();
+  const all = await readDictShards(opts.difficulty);
   const taggedOnly = opts.taggedOnly !== false;
   const filtered = all.filter((e) => {
     if (taggedOnly && (!e.tags || e.tags.length === 0)) return false;
-    if (opts.difficulty && !opts.difficulty.includes(e.difficulty)) return false;
-    if (opts.scenario) {
-      const hit = e.senses.some((s) => s.scenarios.includes(opts.scenario as Scenario));
-      if (!hit) return false;
-    }
+    const eff = effectiveDict(e);
+    if (opts.difficulty && !opts.difficulty.includes(eff.difficulty)) return false;
+    if (opts.scenario && !eff.scenarios.includes(opts.scenario)) return false;
     return true;
   });
   filtered.sort((a, b) => {
-    // 先按 difficulty 升序
-    if (a.difficulty !== b.difficulty) return a.difficulty - b.difficulty;
+    const ad = effectiveDict(a).difficulty;
+    const bd = effectiveDict(b).difficulty;
+    if (ad !== bd) return ad - bd;
     // 同难度按 frq 升序（高频优先）
     const af = a.frq ?? Number.MAX_SAFE_INTEGER;
     const bf = b.frq ?? Number.MAX_SAFE_INTEGER;
@@ -378,33 +434,41 @@ export async function pickDictBy(opts: {
 }
 
 // ============================================================
-// Corpus (JSONL)
+// Corpus (按 difficulty 分片 JSONL)
 // ============================================================
 
-export async function readAllCorpus(): Promise<CorpusEntry[]> {
-  try {
-    const text = await fs.readFile(CORPUS_FILE, 'utf8');
-    return text
-      .split('\n')
-      .filter((l) => l.trim().length > 0)
-      .map((line, idx) => {
-        try {
-          return CorpusEntrySchema.parse(JSON.parse(line));
-        } catch (err) {
-          throw new Error(`Invalid corpus at line ${idx + 1}: ${(err as Error).message}`);
-        }
-      });
-  } catch (e: any) {
-    if (e?.code === 'ENOENT') return [];
-    throw e;
+async function readCorpusShards(difficulties?: number[]): Promise<CorpusEntry[]> {
+  const targets = (difficulties && difficulties.length
+    ? difficulties.map(clampDifficulty)
+    : Array.from({ length: DIFFICULTY_MAX - DIFFICULTY_MIN + 1 }, (_, i) => i + DIFFICULTY_MIN))
+    .map((d) => path.join(CORPUS_DIR, `d${d}.jsonl`));
+  const out: CorpusEntry[] = [];
+  for (const f of targets) {
+    out.push(...(await readShard(f, (r) => CorpusEntrySchema.parse(r))));
   }
+  return out;
+}
+
+export async function readAllCorpus(): Promise<CorpusEntry[]> {
+  return readCorpusShards();
 }
 
 export async function appendCorpus(entries: CorpusEntry[]): Promise<void> {
   if (entries.length === 0) return;
   await ensureDirs();
-  const text = entries.map((e) => JSON.stringify(CorpusEntrySchema.parse(e))).join('\n') + '\n';
-  await fs.appendFile(CORPUS_FILE, text, 'utf8');
+  const byShard = new Map<string, CorpusEntry[]>();
+  for (const e of entries) {
+    const parsed = CorpusEntrySchema.parse(e);
+    const d = clampDifficulty(effectiveCorpus(parsed).difficulty);
+    const file = corpusShardFile(d);
+    const arr = byShard.get(file) ?? [];
+    arr.push(parsed);
+    byShard.set(file, arr);
+  }
+  for (const [file, arr] of byShard) {
+    const text = arr.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    await fs.appendFile(file, text, 'utf8');
+  }
 }
 
 export async function pickCorpusBy(opts: {
@@ -412,7 +476,7 @@ export async function pickCorpusBy(opts: {
   difficulty?: number[];
   limit?: number;
 }): Promise<CorpusEntry[]> {
-  const all = await readAllCorpus();
+  const all = await readCorpusShards(opts.difficulty);
   const limit = opts.limit ?? Infinity;
   const out: CorpusEntry[] = [];
   for (const e of all) {
@@ -423,4 +487,14 @@ export async function pickCorpusBy(opts: {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+// ============================================================
+// 给 skill 用的低层助手：列出现有分片文件，方便 skill 扫描
+// ============================================================
+export function listDictShards(): string[] {
+  return allShards(DICT_DIR);
+}
+export function listCorpusShards(): string[] {
+  return allShards(CORPUS_DIR);
 }

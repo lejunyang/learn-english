@@ -13,7 +13,7 @@ import path from 'node:path';
 import { parse } from 'csv-parse';
 import { DictEntrySchema, type DictEntry, type Scenario } from '../src/domain/schemas.js';
 import { classifyScenarios } from '../src/domain/tags.js';
-import { DICT_FILE, readAllDict } from '../src/domain/store.js';
+import { appendDict, readAllDict } from '../src/domain/store.js';
 
 const SRC = path.resolve('data/raw/ecdict.csv');
 
@@ -124,6 +124,7 @@ async function main() {
   let skippedInvalid = 0;
   let skippedDup = 0;
   let skippedNoTranslation = 0;
+  let skippedNoSignal = 0; // 既无 frq 又无 tag → 无判定信号，丢弃
 
   // 收集批写出（每 5000 条 flush 一次，省内存）
   const FLUSH_SIZE = 5000;
@@ -150,7 +151,15 @@ async function main() {
 
     const frq = parseInt(row.frq || '0', 10) || 0;
     const bnc = parseInt(row.bnc || '0', 10) || 0;
-    const tag = row.tag || '';
+    const tag = (row.tag || '').trim();
+    const tagList = tag.split(/\s+/).filter(Boolean);
+
+    // 没有 frq 且没有 tag → 完全没有判定信号，跳过（多半是冷僻/无意义条目）
+    if (!frq && tagList.length === 0) {
+      skippedNoSignal++;
+      continue;
+    }
+
     const difficulty = inferDifficulty(tag, frq);
 
     // 为每个 sense 自动打场景标签（基于 cn 释义关键词匹配）
@@ -175,15 +184,24 @@ async function main() {
       }
     }
 
+    // 启发式估算：lemma 级 scenarios 是所有 sense 场景的并集 + 整词命中的并集
+    const estimatedScenarios: Scenario[] = Array.from(new Set([
+      ...wordScenarios,
+      ...sensesWithScenarios.flatMap((s) => s.scenarios),
+    ])) as Scenario[];
+
     const entry: DictEntry = DictEntrySchema.parse({
       lemma: word,
       ipa: row.phonetic ? { any: row.phonetic } : undefined,
       pos: row.pos ? row.pos.split(/\s+/).filter(Boolean) : [],
-      tags: tag.split(/\s+/).filter(Boolean),
+      tags: tagList,
       frq: frq || undefined,
       bnc: bnc || undefined,
-      difficulty,
       senses: sensesWithScenarios,
+      estimated: {
+        difficulty,
+        scenarios: estimatedScenarios,
+      },
       exchange: row.exchange || undefined,
       source: 'ecdict',
     });
@@ -192,16 +210,14 @@ async function main() {
     kept++;
 
     if (batch.length >= FLUSH_SIZE) {
-      const lines = batch.map((e) => JSON.stringify(e)).join('\n') + '\n';
-      await fs.appendFile(DICT_FILE, lines, 'utf8');
+      await appendDict(batch);
       batch = [];
       if (kept % 50000 === 0) console.log(`[ingest-ecdict] kept ${kept}...`);
     }
   }
 
   if (batch.length) {
-    const lines = batch.map((e) => JSON.stringify(e)).join('\n') + '\n';
-    await fs.appendFile(DICT_FILE, lines, 'utf8');
+    await appendDict(batch);
   }
 
   console.log(`[ingest-ecdict] done.`);
@@ -209,6 +225,7 @@ async function main() {
   console.log(`  skipped invalid:    ${skippedInvalid}`);
   console.log(`  skipped duplicate:  ${skippedDup}`);
   console.log(`  skipped no trans:   ${skippedNoTranslation}`);
+  console.log(`  skipped no signal:  ${skippedNoSignal}`);
 }
 
 main().catch((e) => {

@@ -5,7 +5,7 @@
 ## 设计取向
 
 - **以本地数据为主、AI 为补**。一次启动学习时，先从本地词典 + 句子语料拼装题目，本地拼不出的部分才用 LLM 现生成。这样既省 token、又便于复习/审计。
-- **文件即数据库**。`data/items.jsonl`（题目）+ `data/schedule.json`（FSRS 调度）+ `data/sessions/*.jsonl`（每天会话）+ `data/mistakes.jsonl`（错题本）+ `data/dict.jsonl`（词典）+ `data/corpus.jsonl`（句子语料）。
+- **文件即数据库**。`data/items.jsonl`（题目）+ `data/schedule.json`（FSRS 调度）+ `data/sessions/*.jsonl`（每天会话）+ `data/mistakes.jsonl`（错题本）+ `data/dict/d{N}.jsonl`（词典，按 difficulty 分片）+ `data/corpus/d{N}.jsonl`（句子语料，按 difficulty 分片）。
 - **AI 提供商可换**。`@ai-sdk/anthropic` 与 `@ai-sdk/openai-compatible` 同时可用，通过 `.env` 切换。
 
 ## 快速开始
@@ -22,13 +22,16 @@ pnpm dev                      # 同时启动 server (:5174) + web (:5173)
 
 ## 本地语料初始化（一次性 / 可重复）
 
-### 1. ECDICT 词典（约 77 万条，0 token）
+### 1. ECDICT 词典（约 77 万条原始 → 4 万条入库，0 token）
 
 ```bash
 curl -sL https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv \
   -o data/raw/ecdict.csv
 pnpm ingest:ecdict
-# → data/dict.jsonl
+# → data/dict/d{1..10}.jsonl（按 difficulty 分片）
+# → 既无 frq 又无 tag 的条目被丢弃（约 33 万条），它们没有判定信号
+# → 每条 entry 写入 estimated.{difficulty, scenarios}（tag/frq 推出）
+# → 可用 /dict-confirm skill 让 AI 复核 → aiConfirmed
 ```
 
 ### 2. Tatoeba 中英平行句对（约 48k 条入库，0 token）
@@ -46,7 +49,8 @@ data/raw/cmn-eng_links.tsv.bz2
 ```bash
 pnpm ingest:tatoeba
 # → 解压、繁→简、质量过滤、查 dict 估算难度/关键词、按关键词词表估场景
-# → 写入 data/corpus.jsonl 的 estimated 字段
+# → 写入 data/corpus/d{1..10}.jsonl（按 estimated.difficulty 分片）的 estimated 字段
+# → 可用 /corpus-confirm skill 让 AI 复核 → aiConfirmed
 ```
 
 ### 3. 场景级 AI 批生成（可选，按需）
@@ -57,17 +61,20 @@ pnpm ingest:tatoeba
 
 这是一个**通用 skill**，让当前宿主 AI（Claude Code / Trae / Cursor 等）自己为指定场景生成 dict + corpus，结果直接进 `aiConfirmed`。详见 `.claude/skills/ingest-corpus/SKILL.md`。
 
-### 4. 用 AI 复核 Tatoeba 入库的句子（推荐）
+### 4. 用 AI 复核启发式估算的语料（推荐）
 
-Tatoeba 入库时是用关键词词表 + 词频做**启发式**估算（`estimated` 字段）。质量不高。可以让你正在用的 AI agent 调用通用 skill：
+Tatoeba 入库的 corpus 与 ECDICT 入库的 dict 都是用规则/字典做**启发式**估算（`estimated` 字段），质量有限。可以让你正在用的 AI agent 调用对应 skill 复核：
 
 ```
-/corpus-confirm
+/corpus-confirm       # 复核 data/corpus/ 下的句子（difficulty / scenarios / keywords）
+/dict-confirm         # 复核 data/dict/ 下的词条（lemma 级 difficulty / scenarios）
 ```
 
-它会从 `data/corpus.jsonl` 取出尚未 `aiConfirmed` 的条目，让当前 AI 重新评估难度/场景/关键词，结果写回 `aiConfirmed`。详见 `.claude/skills/corpus-confirm/SKILL.md`。
+它们都是从对应分片目录取出尚未 `aiConfirmed` 的条目，让当前 AI 重新评估，结果写回 `aiConfirmed`。详见：
+- `.claude/skills/corpus-confirm/SKILL.md`
+- `.claude/skills/dict-confirm/SKILL.md`
 
-读路径优先级是 `aiConfirmed > estimated > 顶层 legacy`，所以复核越多，题库质量越高。
+读路径优先级是 `aiConfirmed > estimated`，所以复核越多，题库质量越高。
 
 ## 目录结构
 
@@ -101,27 +108,30 @@ web/
     pages/                Home / Learn / Stats
     components/Quiz       4 种题型 UI + 音标 + 流式讲解
 scripts/
-  ingest-ecdict.ts        ECDICT → dict.jsonl
-  ingest-tatoeba.ts       Tatoeba → corpus.jsonl（含繁→简、启发式估算→estimated）
+  ingest-ecdict.ts        ECDICT → data/dict/d{N}.jsonl（按 difficulty 分片）
+  ingest-tatoeba.ts       Tatoeba → data/corpus/d{N}.jsonl（含繁→简、启发式估算→estimated）
   kill-ports.mjs          清掉端口占用
 data/
-  dict.jsonl              词典（gitignored）
-  corpus.jsonl            句子语料（gitignored）
+  dict/d{1..10}.jsonl     词典分片（已跟踪进 git）
+  corpus/d{1..10}.jsonl   句子语料分片（已跟踪进 git）
   items.jsonl             已出过的题
   schedule.json           FSRS 调度
   index.json              派生索引（用于快速查询）
   sessions/<YYYY-MM-DD>.jsonl  按天的会话记录
   mistakes.jsonl          错题本（翻译题低分自动追加）
-  drafts/                 中途未结束会话的草稿（用于 resume）
+  drafts/                 中途未结束会话的草稿（用于 resume，gitignored）
   raw/                    ingest 用的原始下载文件（gitignored）
 .claude/
   skills/
     ingest-corpus/        通用 skill：为指定场景从零生成 dict + corpus（宿主 AI 生成、本地脚本写盘）
       SKILL.md
       ingest-corpus.ts
-    corpus-confirm/       通用 skill：复核 Tatoeba 启发式估算的 corpus（宿主 AI 判定、本地脚本写盘）
+    corpus-confirm/       通用 skill：复核 corpus 的 difficulty/scenarios/keywords
       SKILL.md
       corpus-confirm.ts
+    dict-confirm/         通用 skill：lemma 级复核 dict 的 difficulty/scenarios
+      SKILL.md
+      dict-confirm.ts
 ```
 
 ## 题型
@@ -136,8 +146,8 @@ data/
 ## 关键字段速查
 
 - **difficulty**: `1..10` 整数。1 = 基础常用（"I am happy."），10 = 罕用/复杂学术或习语。三处一致：`ItemSchema / DictEntrySchema / CorpusEntrySchema`。
-- **scenarios**: 受控词表，见 `src/domain/tags.ts` 的 `SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS`。新加场景要 4 处同步（schema 元组、SCENARIO_INFO、SCENARIO_KEYWORDS、可选 ingest 脚本）。
-- **CorpusEntry 的 estimated / aiConfirmed**: 启发式估算结果 vs AI 复核结果。读取通过 `effectiveCorpus()` 走优先级：`aiConfirmed > estimated > 顶层 legacy`。
+- **scenarios**: 受控词表，见 `src/domain/tags.ts` 的 `SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS`。新加场景要 3 处同步（schema 元组、SCENARIO_INFO、SCENARIO_KEYWORDS）。
+- **CorpusEntry / DictEntry 的 estimated 与 aiConfirmed**: 启发式估算结果 vs AI 复核结果。读取通过 `effectiveCorpus()` / `effectiveDict()` 走优先级：`aiConfirmed > estimated`。dict 和 corpus 都按 difficulty 分片存储在 `data/{dict,corpus}/d{N}.jsonl`。
 - **fingerprint** (`store.ts/fingerprintOf`): `type + prompt + answer` 的规范化拼接，用于去重。
 
 ## 常用脚本
@@ -150,12 +160,13 @@ pnpm build                  # 同时构建
 pnpm typecheck              # tsc --noEmit
 pnpm kill                   # 清 5173/5174 端口占用
 
-pnpm ingest:ecdict          # ECDICT → dict.jsonl
-pnpm ingest:tatoeba         # Tatoeba → corpus.jsonl
+pnpm ingest:ecdict          # ECDICT → data/dict/d{N}.jsonl
+pnpm ingest:tatoeba         # Tatoeba → data/corpus/d{N}.jsonl
 
-# 下面两个是 skill，用 pnpm exec tsx 直接调脚本；更建议在 AI agent 里 /ingest-corpus 或 /corpus-confirm 触发
+# 下面三个是 skill，用 pnpm exec tsx 直接调脚本；更建议在 AI agent 里 /ingest-corpus / /corpus-confirm / /dict-confirm 触发
 pnpm exec tsx .claude/skills/ingest-corpus/ingest-corpus.ts plan <scenario> --count 30
 pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts stats
+pnpm exec tsx .claude/skills/dict-confirm/dict-confirm.ts stats
 ```
 
 ## 环境变量

@@ -12,7 +12,7 @@ import { ulid } from 'ulid';
 import { Converter } from 'opencc-js';
 import { CorpusEntrySchema, type CorpusEntry } from '../src/domain/schemas.js';
 import { classifyScenarios } from '../src/domain/tags.js';
-import { CORPUS_FILE, readAllCorpus } from '../src/domain/store.js';
+import { appendCorpus, readAllCorpus } from '../src/domain/store.js';
 
 const t2s = Converter({ from: 'tw', to: 'cn' });
 
@@ -191,10 +191,7 @@ async function main() {
       id: ulid(),
       en: picked,
       cn,
-      // 顶层留空数组/最低难度占位；真值放到 estimated，由后续 skill 复核回填 aiConfirmed
-      keywords: [],
-      scenarios: [],
-      difficulty: 1,
+      // 启发式估算落到 estimated；顶层 legacy 不写。由后续 skill 复核回填 aiConfirmed
       estimated: { difficulty, scenarios, keywords },
       source: 'tatoeba',
     });
@@ -202,14 +199,14 @@ async function main() {
     kept++;
 
     if (batch.length >= FLUSH) {
-      await fs.appendFile(CORPUS_FILE, batch.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+      await appendCorpus(batch);
       batch = [];
       console.log(`[ingest-tatoeba] kept ${kept}...`);
     }
   }
 
   if (batch.length) {
-    await fs.appendFile(CORPUS_FILE, batch.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+    await appendCorpus(batch);
   }
 
   console.log(`[ingest-tatoeba] done.`);

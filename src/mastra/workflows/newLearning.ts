@@ -14,6 +14,7 @@ import { newEntry } from '../../domain/fsrs.js';
 import {
   ItemSchema,
   effectiveCorpus,
+  effectiveDict,
   type Item,
   type Scenario,
   type DictEntry,
@@ -267,7 +268,7 @@ function dictToItem(
     type,
     scenario: opts.scenario,
     langTags: ['word'],
-    difficulty: d.difficulty,
+    difficulty: effectiveDict(d).difficulty,
     prompt: promptObj,
     answer: answerObj,
     distractors,
@@ -298,9 +299,10 @@ function pickDistractors(
   const seen = new Set<string>();
   const excludeKey = (type === 'en2cn' ? exclude.senses[0]?.cn[0] : exclude.lemma)?.toLowerCase() ?? '';
   // 同 pool 取相近难度（10 级粒度下放宽到 ±2）
+  const excludeDiff = effectiveDict(exclude).difficulty;
   const candidates = pool.filter(
     (d) => d.lemma.toLowerCase() !== exclude.lemma.toLowerCase() &&
-      Math.abs(d.difficulty - exclude.difficulty) <= 2,
+      Math.abs(effectiveDict(d).difficulty - excludeDiff) <= 2,
   );
   const shuffled = shuffle(candidates);
   const out: string[] = [];

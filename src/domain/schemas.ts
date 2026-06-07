@@ -260,17 +260,54 @@ export const DictEntrySchema = z
     tags: z.array(z.string()).default([]), // cet4/cet6/ky/toefl/ielts/gre/zk/gk
     frq: z.number().int().optional(), // COCA 频率排名 (越小越高频)
     bnc: z.number().int().optional(),
-    difficulty: DifficultySchema,
     senses: z.array(DictSenseSchema).default([]),
+    // difficulty / scenarios 走双层结构：estimated（启发式 tag/frq 推出来）vs aiConfirmed（AI 复核）。
+    // 顶层不再保留 legacy difficulty；effectiveDict() 走 aiConfirmed → estimated → senses 并集。
+    estimated: z
+      .object({
+        difficulty: DifficultySchema.optional(),
+        scenarios: z.array(z.enum(SCENARIOS)).optional(),
+      })
+      .passthrough()
+      .optional(),
+    aiConfirmed: z
+      .object({
+        difficulty: DifficultySchema.optional(),
+        scenarios: z.array(z.enum(SCENARIOS)).optional(),
+        confirmedAt: z.string().optional(),
+        model: z.string().optional(),
+        notes: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     exchange: z.string().optional(), // ECDICT 词形变化原文
     source: z.string(), // ecdict / oxford / ai-generated:xxx
   })
   .passthrough();
 export type DictEntry = z.infer<typeof DictEntrySchema>;
 
+/**
+ * 取得 dict entry 的有效 {difficulty, scenarios}：
+ * 优先 aiConfirmed → estimated → （兜底）senses[].scenarios 并集 + DIFFICULTY_MIN。
+ */
+export function effectiveDict(d: DictEntry): {
+  difficulty: number;
+  scenarios: Scenario[];
+} {
+  const ai = d.aiConfirmed ?? {};
+  const est = d.estimated ?? {};
+  const senseScenarios = Array.from(
+    new Set((d.senses ?? []).flatMap((s) => s.scenarios ?? [])),
+  ) as Scenario[];
+  return {
+    difficulty: ai.difficulty ?? est.difficulty ?? DIFFICULTY_MIN,
+    scenarios: (ai.scenarios ?? est.scenarios ?? senseScenarios) as Scenario[],
+  };
+}
+
 // CorpusEntry 评估字段：difficulty / scenarios / keywords
 // 拆成 estimated（启发式/规则估计）和 aiConfirmed（AI 复核后写回）两层。
-// 读路径优先级：aiConfirmed > estimated > 顶层 legacy 字段
+// 顶层不保留这几个字段；读取一律走 effectiveCorpus()。
 export const CorpusJudgementSchema = z
   .object({
     difficulty: DifficultySchema.optional(),
@@ -287,10 +324,6 @@ export const CorpusEntrySchema = z
     id: z.string(), // ulid
     en: z.string(),
     cn: z.string().optional(), // 中文翻译（可能没有）
-    // 顶层 keywords/scenarios/difficulty 保留为向后兼容老数据，新增数据建议写进 estimated
-    keywords: z.array(z.string()).default([]),
-    scenarios: z.array(z.enum(SCENARIOS)).default([]),
-    difficulty: DifficultySchema,
     estimated: CorpusJudgementSchema.optional(),
     aiConfirmed: CorpusJudgementSchema.optional(),
     cefr: z.string().optional(),
@@ -300,7 +333,7 @@ export const CorpusEntrySchema = z
 export type CorpusEntry = z.infer<typeof CorpusEntrySchema>;
 
 /**
- * 取得 corpus entry 的有效字段：优先 aiConfirmed → estimated → 顶层 legacy。
+ * 取得 corpus entry 的有效字段：优先 aiConfirmed → estimated → 兜底（最低难度/空场景/空 keywords）。
  */
 export function effectiveCorpus(c: CorpusEntry): {
   difficulty: number;
@@ -310,8 +343,8 @@ export function effectiveCorpus(c: CorpusEntry): {
   const ai = c.aiConfirmed ?? {};
   const est = c.estimated ?? {};
   return {
-    difficulty: ai.difficulty ?? est.difficulty ?? c.difficulty,
-    scenarios: (ai.scenarios ?? est.scenarios ?? c.scenarios) as Scenario[],
-    keywords: ai.keywords ?? est.keywords ?? c.keywords,
+    difficulty: ai.difficulty ?? est.difficulty ?? DIFFICULTY_MIN,
+    scenarios: (ai.scenarios ?? est.scenarios ?? []) as Scenario[],
+    keywords: ai.keywords ?? est.keywords ?? [],
   };
 }

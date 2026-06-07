@@ -43,12 +43,13 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
 - 自带 `tag`（zk/gk/cet4/cet6/ky/toefl/ielts/gre）、`frq`（COCA 频率）、`bnc` 等元信息 → 0 token 估难度。
 - 带英美音标。
 
-`scripts/ingest-ecdict.ts` 把 CSV 转成 `data/dict.jsonl`，按 lemma 唯一去重。
+`scripts/ingest-ecdict.ts` 把 CSV 转成 `data/dict/d{N}.jsonl`（按 difficulty 分片），按 lemma 唯一去重。
 
 **易错点**：
 - `translation` 字段是多行混杂，需要 `parseTranslation` 按词性前缀（n./v./adj./...）和分号切；超过 30 字符的多半是例句而不是中文释义。
 - 有些"翻译"是 `[网络] / [医] / [化] / [电]` 这种专业领域前缀，质量很差，直接整行跳过。
 - `isValidLemma` 限制：≤40 字符、≤3 词、不含中文/问号/感叹号。再宽容会被各种垃圾条目污染。
+- **既无 `frq` 又无 `tag` 的条目直接丢弃**（约 33 万 / 77 万）。这种条目通常是冷僻/无意义的混入，没有任何判定信号，留着只会污染候选池。
 
 ### 2.3 句子语料选 Tatoeba
 
@@ -63,8 +64,8 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
 2. 加载 cmn / eng / links 三个 map。
 3. 用 `opencc-js` 把繁体转简体（**关键**：Tatoeba 中文相当大比例是繁体，不转换会让前端体验割裂，估算关键词也会错位）。
 4. 英文按词数 5-25、中文按字数 5-40 过滤。
-5. 已有 `corpus.jsonl` 的句子做去重（`en.toLowerCase().replace(/\s+/g,' ').trim()` 作为指纹）。
-6. 用 `dict.jsonl` 算 `difficulty`（已知 lemma 难度的上四分位数 + 句长偏置，线性映射到 1..10）。
+5. 已有 `corpus` 分片中的句子做去重（`en.toLowerCase().replace(/\s+/g,' ').trim()` 作为指纹）。
+6. 用 `dict` 分片汇总后算 `difficulty`（已知 lemma 难度的上四分位数 + 句长偏置，线性映射到 1..10）。
 7. 用 `SCENARIO_KEYWORDS` 字面匹配 `scenarios`。
 8. 抽 keywords（≥4 字符、难度 ≥2、最多 3 个）。
 
@@ -130,12 +131,45 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
 - 读取一律走 `effectiveCorpus(c)`：`aiConfirmed > estimated > 顶层`。
 - 新增 `/corpus-confirm` skill：纯 I/O 后端 + skill 描述，**不调任何后端 agent**，让宿主 AI 自己判定后写回。
 
-参考实现：`scripts/corpus-confirm.ts` 三个子命令 `pending / write / stats`。
+参考实现：`.claude/skills/corpus-confirm/corpus-confirm.ts` 三个子命令 `pending / write / stats`。
 
 ### 2.8 前端 effort 命名
 
 最初叫"深入程度"（轻松/常规/深入），用户反馈不直观。
 → 改名"模型 effort"，选项"低/中/高"。
+
+### 2.9 dict/corpus 按 difficulty 分片 + dict 加 estimated/aiConfirmed
+
+最初 dict 和 corpus 都是单文件 `data/dict.jsonl`、`data/corpus.jsonl`。问题：
+
+- 单文件 dict ~38MB / corpus ~10MB，git diff 体验差；
+- 想跟踪入 git 但太大；
+- 出题 `pickDictBy({difficulty: [1,2]})` 每次都要全量读 + 过滤，浪费 IO。
+
+→ 拆为 `data/dict/d{1..10}.jsonl`、`data/corpus/d{1..10}.jsonl` 共 20 个分片：
+- 入库时按 `effectiveDict/Corpus(e).difficulty` 决定写哪个分片；
+- `pickDictBy/pickCorpusBy` 指定 difficulty 子集时只读对应分片；
+- 整个 `data/dict/` 和 `data/corpus/` 都进 git。
+
+同时把 dict 也升级到 corpus 同款双层结构：
+- `estimated.{difficulty, scenarios}` — ECDICT tag/frq 推出 + `classifyScenarios` 字面匹配；
+- `aiConfirmed.{difficulty, scenarios, model?, notes?}` — `/dict-confirm` skill 写入；
+- `effectiveDict(d)` 取 `aiConfirmed > estimated > senses 并集兜底`；
+- ECDICT 入库时**既无 frq 又无 tag 的条目直接丢弃**（约 33 万条无判定信号的混入）。
+
+此次也直接清空 dict.jsonl/corpus.jsonl 旧数据重跑 —— 不再保留 legacy 顶层 `difficulty/scenarios/keywords` 字段（schema 不再有这些必填项）。
+
+新增 `/dict-confirm` skill（与 corpus-confirm 完全对称），lemma 级复核。
+
+### 2.10 三个 skill 的统一形态
+
+三个 skill 同住 `.claude/skills/<name>/`，每个目录自包含 `SKILL.md + <name>.ts`：
+
+- `ingest-corpus` —— 为指定场景"无中生有"，AI 生成 dict + corpus
+- `corpus-confirm` —— 复核 corpus（句子）的 difficulty / scenarios / keywords
+- `dict-confirm` —— 复核 dict（词条）的 difficulty / scenarios（lemma 级）
+
+共同原则：**脚本不 spawn agent**，生成/判定由当前宿主 AI 完成。脚本只做 I/O（plan / pending / write / stats）。这避免了"在哪触发都还是 .env 写死的某个模型在干活"的坑，跨 agent 平台（Claude Code / Trae / Cursor）复用同一协议。
 
 这个值控制 `count = round(minutes * 2 * effortMultiplier)`，effortMultiplier ∈ {0.7, 1.0, 1.5}。不影响题质，只影响数量。
 
@@ -174,18 +208,24 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
   tags: string[],                      // ECDICT 的 zk/gk/cet4/cet6/ky/toefl/ielts/gre
   frq?: number,                        // COCA 频率排名（越小越高频）
   bnc?: number,
-  difficulty: 1..10,
   senses: Array<{                      // 多义项
     pos?: string,
     cn: string[],
     definition?: string,
-    scenarios: Scenario[],             // 该义项所属场景
+    scenarios: Scenario[],             // 该义项所属场景（启发式）
     examples: { en, cn? }[],
   }>,
+
+  // difficulty / scenarios 走双层结构（同 corpus）
+  estimated?:   { difficulty?, scenarios? },               // ECDICT tag/frq 推出
+  aiConfirmed?: { difficulty?, scenarios?, confirmedAt?, model?, notes? },  // /dict-confirm 写回
+
   exchange?: string,                   // ECDICT 原文（词形变化）
   source: 'ecdict' | 'oxford' | 'ai-generated:<model>:<date>',
 }
 ```
+
+**读取一律走 `effectiveDict(d)`**，返回 `{difficulty, scenarios}`，优先级 `aiConfirmed > estimated > senses 并集兜底`。
 
 ### 3.3 CorpusEntrySchema（句子语料）
 
@@ -195,21 +235,16 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
   en: string,
   cn?: string,
 
-  // 顶层 legacy（兼容老的 48k 条 Tatoeba 数据）
-  difficulty: 1..10,
-  scenarios: Scenario[],
-  keywords: string[],
-
-  // 新数据写到这里（Tatoeba 启发式 → estimated；/ingest-corpus AI 生成 → aiConfirmed）
-  estimated?:   { difficulty?, scenarios?, keywords? },
-  aiConfirmed?: { difficulty?, scenarios?, keywords?, confirmedAt?, model?, notes? },
+  // difficulty/scenarios/keywords 走双层
+  estimated?:   { difficulty?, scenarios?, keywords? },               // Tatoeba 启发式估算
+  aiConfirmed?: { difficulty?, scenarios?, keywords?, confirmedAt?, model?, notes? },  // /corpus-confirm 写回
 
   cefr?: string,
   source: string,                      // 'tatoeba' / 'ai-generated:<model>:<date>'
 }
 ```
 
-**读取规则**：永远用 `effectiveCorpus(c)`，它返回 `{difficulty, scenarios, keywords}`，优先级 `aiConfirmed > estimated > legacy 顶层`。
+**读取规则**：永远用 `effectiveCorpus(c)`，返回 `{difficulty, scenarios, keywords}`，优先级 `aiConfirmed > estimated`。
 
 ### 3.4 ScheduleEntrySchema（FSRS）
 
@@ -259,10 +294,13 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
                     estimated 子对象 ◄───────────────────────────┘
                            │
                            ▼
-                    CorpusEntrySchema.parse → append data/corpus.jsonl
-                           │
-                           ▼
-                    （后续）/corpus-confirm 让 AI 复核 → 写 aiConfirmed
+                    CorpusEntrySchema.parse → appendCorpus()
+                                                    │
+                                                    ▼
+                              按 estimated.difficulty 分片到 data/corpus/d{N}.jsonl
+                                                    │
+                                                    ▼
+                              （后续）/corpus-confirm 让 AI 复核 → 写 aiConfirmed
 ```
 
 每 5000 条 flush 一次，全量约 48k。
@@ -288,7 +326,8 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
 
 - JSON 文件用字典序 stringify（`store.ts/stableStringify`），diff 不会乱跳。
 - JSONL 文件 append 即可，行内顺序不重要。
-- `data/dict.jsonl` 和 `data/corpus.jsonl` **已 gitignore**（太大），其余都跟踪。
+- `data/dict/` 和 `data/corpus/` **进 git 跟踪**（按 difficulty 分片后单文件最大约 6MB，可接受）。`data/raw/` 仍 gitignore（原始 bz2/csv 太大）。
+- `data/drafts/` 也 gitignore（运行时临时草稿）。
 
 ### 5.4 与 LLM 协作
 
@@ -296,11 +335,12 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
 - 所有 LLM 输出走 `structuredOutput: { schema }`，schema 失败直接抛，**不要静默 fallback**，否则脏数据会进库。
 - 改 prompt 务必加示例。LLM 对抽象规则的执行率远低于"给 Good / Bad 案例"。
 
-### 5.5 /corpus-confirm
+### 5.5 三个 skill（/ingest-corpus / /corpus-confirm / /dict-confirm）
 
-- 不要把它"升级"成内部 agent。它存在的全部意义就是**不绑模型**。
-- 不要让它跑全量。每次 30-50 条，给宿主 AI 推理空间。
-- 已 `aiConfirmed` 的不会再出现在 pending，要强制重判必须手动从 jsonl 删 `aiConfirmed` 字段。
+- 不要把它们"升级"成内部 agent。存在的全部意义就是**不绑模型**，可在不同 AI agent 平台复用。
+- 不要让它们跑全量。corpus-confirm / dict-confirm 每次 30-50 条；ingest-corpus 一次 30-60 条。给宿主 AI 推理空间。
+- 已 `aiConfirmed` 的不会再出现在 pending；要强制重判必须手动从对应分片 jsonl 删 `aiConfirmed` 字段（dict 按 lemma，corpus 按 id）。
+- dict 和 corpus 的分片是按 `effectiveDict/Corpus.difficulty` 决定的。如果 AI 在 aiConfirmed 里把一条 d3 的词改成 d7，**当前实现不会自动迁移分片**（条目仍在原文件，但 effective 难度变了）。这暂时可接受，因为 `pickDictBy({difficulty:[7]})` 仍能拿到正确条目（它过滤的是 effective 值）。日后做"重分片"维护命令即可。
 
 ### 5.6 端口冲突
 
