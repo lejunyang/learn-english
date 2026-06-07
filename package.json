@@ -14,8 +14,6 @@
     "kill": "node scripts/kill-ports.mjs",
     "ingest:ecdict": "tsx scripts/ingest-ecdict.ts",
     "ingest:tatoeba": "tsx scripts/ingest-tatoeba.ts",
-    "ingest:scenario": "tsx scripts/ingest-scenario.ts",
-    "corpus:confirm": "tsx scripts/corpus-confirm.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

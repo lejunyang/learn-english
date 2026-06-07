@@ -15,5 +15,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src/**/*", "web/src/**/*"]
+  "include": ["src/**/*", "web/src/**/*", ".claude/skills/**/*.ts"]
 }

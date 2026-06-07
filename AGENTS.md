@@ -200,7 +200,7 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
   scenarios: Scenario[],
   keywords: string[],
 
-  // 新数据写到这里（Tatoeba 启发式 → estimated；ingest-scenario AI 生成 → aiConfirmed）
+  // 新数据写到这里（Tatoeba 启发式 → estimated；/ingest-corpus AI 生成 → aiConfirmed）
   estimated?:   { difficulty?, scenarios?, keywords? },
   aiConfirmed?: { difficulty?, scenarios?, keywords?, confirmedAt?, model?, notes? },
 

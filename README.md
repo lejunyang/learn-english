@@ -51,13 +51,11 @@ pnpm ingest:tatoeba
 
 ### 3. 场景级 AI 批生成（可选，按需）
 
-```bash
-/ingest-corpus <scenario> [count] [model]
-# 或直接
-pnpm ingest:scenario devops 50
+```
+/ingest-corpus
 ```
 
-为某个具体场景一次性补 dict + corpus。产物直接进 `aiConfirmed`。
+这是一个**通用 skill**，让当前宿主 AI（Claude Code / Trae / Cursor 等）自己为指定场景生成 dict + corpus，结果直接进 `aiConfirmed`。详见 `.claude/skills/ingest-corpus/SKILL.md`。
 
 ### 4. 用 AI 复核 Tatoeba 入库的句子（推荐）
 
@@ -104,9 +102,7 @@ web/
     components/Quiz       4 种题型 UI + 音标 + 流式讲解
 scripts/
   ingest-ecdict.ts        ECDICT → dict.jsonl
-  ingest-tatoeba.ts       Tatoeba → corpus.jsonl（含繁→简、估算）
-  ingest-scenario.ts      AI 为指定场景批生成 dict + corpus
-  corpus-confirm.ts       /corpus-confirm skill 的纯 I/O 后端（pending/write/stats）
+  ingest-tatoeba.ts       Tatoeba → corpus.jsonl（含繁→简、启发式估算→estimated）
   kill-ports.mjs          清掉端口占用
 data/
   dict.jsonl              词典（gitignored）
@@ -119,11 +115,13 @@ data/
   drafts/                 中途未结束会话的草稿（用于 resume）
   raw/                    ingest 用的原始下载文件（gitignored）
 .claude/
-  commands/
-    ingest-corpus.md      Claude Code 专用 slash 命令，触发 pnpm ingest:scenario
   skills/
-    corpus-confirm/
-      SKILL.md            通用复核 skill（标准 Anthropic Skills 格式，可在 Trae/Cursor 等环境复用，不调后端 agent）
+    ingest-corpus/        通用 skill：为指定场景从零生成 dict + corpus（宿主 AI 生成、本地脚本写盘）
+      SKILL.md
+      ingest-corpus.ts
+    corpus-confirm/       通用 skill：复核 Tatoeba 启发式估算的 corpus（宿主 AI 判定、本地脚本写盘）
+      SKILL.md
+      corpus-confirm.ts
 ```
 
 ## 题型
@@ -154,11 +152,10 @@ pnpm kill                   # 清 5173/5174 端口占用
 
 pnpm ingest:ecdict          # ECDICT → dict.jsonl
 pnpm ingest:tatoeba         # Tatoeba → corpus.jsonl
-pnpm ingest:scenario <s> N  # AI 批生成
 
-pnpm corpus:confirm stats                       # 看复核进度
-pnpm corpus:confirm pending --limit 30 > p.json # 取一批待审
-pnpm corpus:confirm write --input results.json  # 写回 aiConfirmed
+# 下面两个是 skill，用 pnpm exec tsx 直接调脚本；更建议在 AI agent 里 /ingest-corpus 或 /corpus-confirm 触发
+pnpm exec tsx .claude/skills/ingest-corpus/ingest-corpus.ts plan <scenario> --count 30
+pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts stats
 ```
 
 ## 环境变量

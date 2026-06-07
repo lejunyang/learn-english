@@ -23,7 +23,7 @@ description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeb
 句子主要来自两条管线：
 
 1. **Tatoeba**（48k+ 条）—— 一个免费的 cmn-eng 平行语料库。`pnpm ingest:tatoeba` 把它转成 `corpus.jsonl`，配合 ECDICT 词典做启发式估算：用句中**已知 lemma 难度的上四分位数**估 `difficulty`，用关键词词表（见 `src/domain/tags.ts` 的 `SCENARIO_KEYWORDS`）匹配出 `scenarios`，提取 ≥4 字符且难度 ≥2 的非重复词做 `keywords`。这些值都放到 `estimated`。
-2. **AI 场景批生成** —— `pnpm ingest:scenario <scene>` 让 LLM 直接给某个场景生成 dict + corpus；这条路径产出的语料直接落到 `aiConfirmed`，因为本身就是 AI 生成的。
+2. **AI 场景批生成** —— `/ingest-corpus` skill 让宿主 AI 直接给某个场景生成 dict + corpus；这条路径产出的语料直接落到 `aiConfirmed`，因为本身就是 AI 生成的。
 
 **问题在第一条路径**。启发式有几个典型失败：
 - difficulty 被生僻专有名词或单一难词拉偏；
@@ -34,9 +34,10 @@ description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeb
 
 ## 与项目内其它 ingest skill 的关键区别
 
-`/ingest-corpus` 会调用 `pnpm ingest:scenario`，那个脚本内部 `new Agent(...)` 用的是 `.env` 里 `MODEL_GENERATOR` 指定的模型 —— 也就是说，不管你在哪个 AI agent 里触发它，最终干活的都是同一个被写死的后端模型。
+`/ingest-corpus` 是**"无中生有"**：根据指定场景从零生成 dict + corpus 条目，结果直接进 `aiConfirmed`。
+`/corpus-confirm`（本 skill）是**"已有的复核"**：拿 Tatoeba 那批启发式估算过的 corpus 一条条审，覆盖 `aiConfirmed`。
 
-`/corpus-confirm` **不调任何后端 agent**：脚本只做 I/O（取 pending、写回 aiConfirmed），判定完全由"执行本 skill 的当前 AI（你）"完成。这意味着同样的 skill 协议可以在 Claude Code、Trae、Cursor 等任何 AI agent 里直接复用，输出质量取决于宿主模型本身。
+两者都遵循同一原则：**不在脚本内 spawn agent**，判定完全交给当前宿主 AI。脚本只做 I/O —— 这样既能在 Claude Code、Trae、Cursor 等任何 agent 里直接复用，输出质量也直接取决于宿主模型本身。这避免了"不管在哪触发，最终都是 .env 写死的某个模型在干活"那种坑。
 
 ## 调用方式
 
@@ -96,7 +97,7 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 | 1 | `src/domain/schemas.ts` | 在 `SCENARIOS` 元组里追加 `'sports'`（必须放在数组末尾或对应分组注释下，别乱插） |
 | 2 | `src/domain/tags.ts` `SCENARIO_INFO` | 添加 `sports: { label: '运动', group: 'life', hint: '健身、跑步、球类、比赛' }` |
 | 3 | `src/domain/tags.ts` `SCENARIO_KEYWORDS` | 添加 `sports: { en: ['gym','run','workout','match','team','coach','score',...], cn: ['运动','健身','跑步','比赛','球','教练','得分',...] }`。关键词宁缺毋滥，每个 ≥3 字符 |
-| 4 | （可选）`scripts/ingest-scenario.ts` 的允许列表 | 当前是从 `SCENARIOS` 自动派生的，不用改 |
+| 4 | （无需改动） | `/ingest-corpus` skill 的允许场景列表从 `SCENARIOS` 自动派生 |
 
 改完后用户应该 `pnpm typecheck` 确认编译通过；然后**重新触发本 skill**，新出现在 pending 列表里的句子就可以用这个新场景标了（已经被你 confirm 过的不会重判，除非用户手工清掉 `aiConfirmed`）。
 
@@ -111,9 +112,11 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 
 ## 执行步骤（本仓库）
 
+> 脚本就在本 skill 目录下（`.claude/skills/corpus-confirm/corpus-confirm.ts`），用 `tsx` 直接跑，不依赖 package.json 的脚本别名。其它项目复制整个 skill 目录后路径同步即可。
+
 1. **取一批待办**：
    ```bash
-   pnpm corpus:confirm pending --limit <count> > /tmp/corpus-pending.json
+   pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts pending --limit <count> > /tmp/corpus-pending.json
    ```
    输出是数组 `[{id, en, cn, estimated}, ...]`；stderr 打印 `pending=N returning=M`。
 
@@ -125,13 +128,13 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 
 3. **回写**：
    ```bash
-   pnpm corpus:confirm write --input /tmp/corpus-results.json
+   pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts write --input /tmp/corpus-results.json
    ```
    原子写回 `data/corpus.jsonl`，stdout 打印 `{"patched": N, "unknown": M}`。把数字告诉用户。
 
 4. **统计 / 决定是否继续**：
    ```bash
-   pnpm corpus:confirm stats
+   pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts stats
    # → { total, confirmed, pending, untouched }
    ```
    用户没说停就回到步骤 1。
@@ -139,8 +142,10 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 ## 跨产品适配（trae 等）
 
 本 skill 只依赖两个原子能力：
-- "给我下一批 pending 的句子" —— 本仓库对应 `pnpm corpus:confirm pending`
-- "把我判定好的结果写回去" —— 本仓库对应 `pnpm corpus:confirm write`
+- "给我下一批 pending 的句子" —— 本仓库对应 `pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts pending`
+- "把我判定好的结果写回去" —— 本仓库对应 `pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts write`
+
+整个 skill 目录是自包含的：复制 `.claude/skills/corpus-confirm/` 到任何 Node 项目，安装 `tsx`（可选，也可先 `tsc` 编一下）即可使用。脚本只依赖 Node 标准库，不依赖项目内任何模块。
 
 任何 AI agent 环境只要能读 `data/corpus.jsonl`、能写一个 JSONL 文件，就能复用本 skill。把上面两条命令换成等价的 Python/Node/Bash 脚本即可，**字段语义和文件位置保持一致**。
 
