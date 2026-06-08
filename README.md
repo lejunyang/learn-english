@@ -146,7 +146,7 @@ data/
 ## 关键字段速查
 
 - **difficulty**: `1..10` 整数。1 = 基础常用（"I am happy."），10 = 罕用/复杂学术或习语。三处一致：`ItemSchema / DictEntrySchema / CorpusEntrySchema`。
-- **scenarios**: 受控词表，见 `src/domain/tags.ts` 的 `SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS`。新加场景要 3 处同步（schema 元组、SCENARIO_INFO、SCENARIO_KEYWORDS）。
+- **scenarios**: 宽松字符串数组。`src/domain/tags.ts` 里的 `SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS` 是推荐词表与启发式分类表，不是严格校验；AI 复核时可以补充合理新场景。
 - **CorpusEntry / DictEntry 的 estimated 与 aiConfirmed**: 启发式估算结果 vs AI 复核结果。读取通过 `effectiveCorpus()` / `effectiveDict()` 走优先级：`aiConfirmed > estimated`。dict 和 corpus 都按 difficulty 分片存储在 `data/{dict,corpus}/d{N}.jsonl`。
 - **fingerprint** (`store.ts/fingerprintOf`): `type + prompt + answer` 的规范化拼接，用于去重。
 

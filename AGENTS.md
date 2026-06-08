@@ -84,11 +84,11 @@ learn-english 是一个**本地、单用户**的英语学习应用。目标：
 
 最初只有 6 个泛场景：`workplace / computing / ai / travel / daily / food`。
 - 太粗。`computing` 同时盖了"代码 / 部署 / AI / 数据"，出题脱靶率高。
-- → 拓展到 30 个细分场景（5 个大类 × ~5 个细类，见 `SCENARIO_INFO`）。
-- → 旧 6 个保留在 `SCENARIOS` 元组里，但 `SCENARIO_INFO.group = 'misc'`，前端不展示，仅用于历史数据 zod 校验通过。
-- 之后的所有 ingest（含 AI 生成的）都不应该再写老的 6 个。
+- → 拓展为推荐大类 + 二级场景（见 `SCENARIO_INFO`），覆盖工作、学习、计算机科学与 AI、日常交流、日常生活、文化艺术、游戏、旅行、美食、音乐、日用品等。
+- → `ScenarioSchema` 改为宽松字符串，`SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS` 只是推荐词表和启发式分类表，不再是严格枚举。
+- → 旧值仍保留在 `SCENARIO_INFO.group = 'misc'`，用于读历史数据和迁移期兼容，但新数据优先使用更具体的场景。
 
-**新增场景的步骤** 必须 4 处同步，见 `.claude/skills/corpus-confirm/SKILL.md` 的「用户决定补充新场景时需要修改的地方」一节。
+AI 复核或生成时可以补充合理新场景；如果某个新场景高频出现，再把它沉淀进 `SCENARIO_INFO` 和 `SCENARIO_KEYWORDS`，这样前端会展示、启发式 ingest 也能命中。
 
 ### 2.6 difficulty 从 5 级到 10 级
 
@@ -311,8 +311,8 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
 
 ### 5.1 数据/schema 改动
 
-- **改 `SCENARIOS` 元组**：必须同时更新 `SCENARIO_INFO`、`SCENARIO_KEYWORDS`，否则前端不展示或 zod 失败。
-- **删字段**：CorpusEntry 顶层的 `difficulty / scenarios / keywords` 是 legacy 兼容字段，**不要删**，否则 48k 老条目全部 zod fail。
+- **场景字段是宽松字符串**：不要把它改回 `z.enum(SCENARIOS)`；新场景可以先进入数据，常用后再沉淀到 `SCENARIO_INFO`/`SCENARIO_KEYWORDS`。
+- **删字段**：Dict/Corpus 的 `estimated / aiConfirmed` 是核心结构，**不要删**；老数据兼容靠 schema 的 optional/passthrough。
 - **加字段**：默认值要在 schema 上用 `.default(...)` 给出，不然老数据 parse 失败。
 
 ### 5.2 ingest 脚本
@@ -340,7 +340,7 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
 - 不要把它们"升级"成内部 agent。存在的全部意义就是**不绑模型**，可在不同 AI agent 平台复用。
 - 不要让它们跑全量。corpus-confirm / dict-confirm 每次 30-50 条；ingest-corpus 一次 30-60 条。给宿主 AI 推理空间。
 - 已 `aiConfirmed` 的不会再出现在 pending；要强制重判必须手动从对应分片 jsonl 删 `aiConfirmed` 字段（dict 按 lemma，corpus 按 id）。
-- dict 和 corpus 的分片是按 `effectiveDict/Corpus.difficulty` 决定的。如果 AI 在 aiConfirmed 里把一条 d3 的词改成 d7，**当前实现不会自动迁移分片**（条目仍在原文件，但 effective 难度变了）。这暂时可接受，因为 `pickDictBy({difficulty:[7]})` 仍能拿到正确条目（它过滤的是 effective 值）。日后做"重分片"维护命令即可。
+- dict-confirm / corpus-confirm 写回时会按 aiConfirmed 后的 effective difficulty 自动迁移分片；如果手工改 JSONL，记得保持条目所在 `d{N}.jsonl` 与 effective difficulty 一致。
 
 ### 5.6 端口冲突
 

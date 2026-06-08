@@ -84,7 +84,7 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
 必填字段：
 - `lemma`: 必须，从 pending 输出原样回填
 - `difficulty`: 1..10 整数
-- `scenarios`: 受控词表；空数组表示不属于任何已知场景
+- `scenarios`: 宽松字符串数组；优先使用推荐场景，也可以补充贴切的新场景；空数组表示确实没有合适场景
 - `examples`: 二维数组，`examples[i]` 对应 `senses[i]` 的例句。每条 `{en, cn?}`。可以不填所有 sense，只填你想补的
 
 可选字段：
@@ -110,16 +110,9 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
 
 ## 场景词表
 
-**唯一权威**是 `src/domain/tags.ts` 里的 `SCENARIO_KEYWORDS / SCENARIO_INFO`。当前可用：
+`SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS` 是推荐词表，不是严格枚举。推荐大类包括：工作、学习、计算机科学与 AI、日常交流、日常生活、文化艺术、游戏、旅行、美食、音乐、日用品。
 
-- 工作: `biz-email, meeting, interview, negotiation, slack`
-- 技术: `coding, ai-ml, devops, data, system-design`
-- 生活: `shopping, dining, doctor, rent, transport`
-- 文化: `movies, idioms, festivals, memes`
-- 学术: `paper-writing, academic-talk, reading`
-- 旅行: `airport-hotel, directions, complaints`
-
-> 绝不要用 `workplace / computing / ai / travel / daily / food`（历史兼容值）。
+AI 可补充新的 kebab-case 场景 id；不推荐使用 `workplace / computing / ai / travel / daily / food / slack` 等历史兼容值。高频新场景后续再沉淀进 `SCENARIO_INFO / SCENARIO_KEYWORDS`。
 
 不确定场景边界时直接 `Read src/domain/tags.ts`。
 

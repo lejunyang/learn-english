@@ -1,8 +1,8 @@
 import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { models, modelById, MODEL_IDS } from '../provider.js';
-import { GeneratedItemSchema, SCENARIOS, type Scenario, type GeneratedItem } from '../../domain/schemas.js';
-import { SCENARIO_LABELS, SUGGESTED_LANG_TAGS } from '../../domain/tags.js';
+import { GeneratedItemSchema, type Scenario, type GeneratedItem } from '../../domain/schemas.js';
+import { scenarioLabel, SUGGESTED_LANG_TAGS } from '../../domain/tags.js';
 
 // ============================================================
 // 系统提示词 —— 把质量约束写死
@@ -100,7 +100,7 @@ export async function generateItems(opts: {
         .join('\n')}`
     : '';
 
-  const prompt = `场景：${SCENARIO_LABELS[opts.scenario]}（${opts.scenario}）
+  const prompt = `场景：${scenarioLabel(opts.scenario)}（${opts.scenario}）
 请生成 ${opts.count} 条题目。
 
 **JSON 输出契约**：最外层是 \`{ "items": [...] }\`，items 是题目数组，每条题目按 schema 字段填写。**严禁**用 "questions" 等其他键名。

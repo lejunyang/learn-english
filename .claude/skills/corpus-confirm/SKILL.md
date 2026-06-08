@@ -56,7 +56,7 @@ description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeb
 {
   "id": "01HXX...",                // 必须，从 pending 输出原样回填
   "difficulty": 1..10,             // 整数。1 = 入门（"I am happy."）；10 = 罕用/学术/复杂习语
-  "scenarios": ["transport", ...], // 受控词表中取值；空数组表示找不到合适场景（详见下一节）
+  "scenarios": ["transport", ...], // 宽松字符串数组；可用推荐场景，也可补充贴切的新场景
   "keywords": ["transfer", ...]    // 0-3 个适合做填空/记忆的关键词，必须是句子中"字面出现"的词或短语（保留原大小写）
 }
 ```
@@ -67,37 +67,17 @@ description: 对 corpus.jsonl 中尚未经 AI 审核的句子（来源于 Tatoeb
 
 ## 场景词表
 
-**唯一权威**是 `src/domain/tags.ts` 里的 `SCENARIO_KEYWORDS`（含场景 id、英中关键词），以及 `SCENARIO_INFO`（含 label、所属 group、hint）。当前可用的场景 id（按 group 列出）：
+`SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS` 是推荐词表和启发式分类表，不是严格枚举。推荐大类包括：工作、学习、计算机科学与 AI、日常交流、日常生活、文化艺术、游戏、旅行、美食、音乐、日用品。
 
-- 工作: `biz-email, meeting, interview, negotiation, slack`
-- 技术: `coding, ai-ml, devops, data, system-design`
-- 生活: `shopping, dining, doctor, rent, transport`
-- 文化: `movies, idioms, festivals, memes`
-- 学术: `paper-writing, academic-talk, reading`
-- 旅行: `airport-hotel, directions, complaints`
+复核时优先使用推荐场景 id，并参考 `SCENARIO_KEYWORDS` 理解推荐场景的边界。如果句子明显属于未覆盖的新场景，可以直接补充新的 kebab-case 场景 id，不需要先修改 schema。
 
-**复核时应该参考 `SCENARIO_KEYWORDS` 来理解每个场景的内涵**（脚本不会把它喂给你；如果你不确定 `slack` 和 `biz-email` 的边界，请直接 `Read` 那个文件）。
+## 当一个句子不属于推荐场景
 
-## 当一个句子不属于任何已有场景
-
-Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、家庭关系等句子，这些**不属于任何当前 30 个场景**。你的处理方式：
+Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、家庭关系等句子，可能不属于当前推荐场景。处理方式：
 
 1. **先判断是不是真的没有**。比如 `"Don't worry, it'll be fine."` 看起来很泛，但它常出现在 `doctor / complaints / interview` 的安抚语境里 —— 这种情况就标多个场景，或者选最契合的那一个。
-2. **如果真的没有**：把 `scenarios` 留空数组 `[]`，并在 `notes` 里写明"建议补 XXX 场景，因为有大量类似句子如 ..."。**不要硬塞**一个不贴切的场景，那样比留空更糟。
-3. **当你发现累计很多句子都建议同一个新场景**（例如出现了 ≥10 条"运动 / 健身"相关的句子），就**停下来向用户报告**，告诉他建议补哪个场景 id、label、英中关键词大致是什么，让用户决定是否补充。
-
-### 用户决定补充新场景时需要修改的地方
-
-补一个新场景（假设叫 `sports`，label `运动`，归入 `life` 大类）需要改这 4 个位置，**4 处必须同步**，否则 zod 会失败或前端不展示：
-
-| # | 文件 | 改动 |
-| - | --- | --- |
-| 1 | `src/domain/schemas.ts` | 在 `SCENARIOS` 元组里追加 `'sports'`（必须放在数组末尾或对应分组注释下，别乱插） |
-| 2 | `src/domain/tags.ts` `SCENARIO_INFO` | 添加 `sports: { label: '运动', group: 'life', hint: '健身、跑步、球类、比赛' }` |
-| 3 | `src/domain/tags.ts` `SCENARIO_KEYWORDS` | 添加 `sports: { en: ['gym','run','workout','match','team','coach','score',...], cn: ['运动','健身','跑步','比赛','球','教练','得分',...] }`。关键词宁缺毋滥，每个 ≥3 字符 |
-| 4 | （无需改动） | `/ingest-corpus` skill 的允许场景列表从 `SCENARIOS` 自动派生 |
-
-改完后用户应该 `pnpm typecheck` 确认编译通过；然后**重新触发本 skill**，新出现在 pending 列表里的句子就可以用这个新场景标了（已经被你 confirm 过的不会重判，除非用户手工清掉 `aiConfirmed`）。
+2. **如果已有推荐场景都不贴切**：可以直接写新的 kebab-case 场景 id；如果连新场景也难以概括，再把 `scenarios` 留空数组 `[]`，并在 `notes` 里写明原因。
+3. **当你发现累计很多句子都命中同一个新场景**（例如出现了 ≥10 条"运动 / 健身"相关句子），向用户报告建议沉淀哪个场景 id、label、英中关键词。后续只需要补 `src/domain/tags.ts` 的 `SCENARIO_INFO / SCENARIO_KEYWORDS`，方便前端展示和启发式 ingest 命中。
 
 ### 给新场景写 SCENARIO_KEYWORDS 的指南
 

@@ -87,8 +87,8 @@ function normalizeEnKey(en: string): string {
   return en.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function allowedScenarios(): string[] {
-  const legacy = new Set(['workplace', 'computing', 'ai', 'travel', 'daily', 'food']);
+function suggestedScenarios(): string[] {
+  const legacy = new Set(['workplace', 'computing', 'ai', 'travel', 'daily', 'food', 'slack']);
   return (SCENARIOS as readonly string[]).filter((s) => !legacy.has(s));
 }
 
@@ -103,11 +103,6 @@ function sampleK<T>(arr: T[], k: number): T[] {
 
 async function cmdPlan(args: Args) {
   const scenario = args.scenario!;
-  if (!(SCENARIOS as readonly string[]).includes(scenario)) {
-    console.error(`unknown scenario: ${scenario}`);
-    console.error('  allowed:', allowedScenarios().join(', '));
-    process.exit(1);
-  }
   const dictCount = Math.round(args.count * DICT_RATIO);
   const corpusCount = args.count - dictCount;
 
@@ -132,7 +127,7 @@ async function cmdPlan(args: Args) {
     existingCorpusCount: existingEnKeys.length,
     sampleExistingLemmas: sampleK(existingLemmas, SAMPLE_K),
     sampleExistingEnKeys: sampleK(existingEnKeys, SAMPLE_K),
-    allowedScenarios: allowedScenarios(),
+    suggestedScenarios: suggestedScenarios(),
   };
   process.stdout.write(JSON.stringify(plan, null, 2));
 }

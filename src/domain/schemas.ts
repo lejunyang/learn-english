@@ -1,25 +1,36 @@
 import { z } from 'zod';
 
 // ============================================================
-// 受控词表 —— 见 src/domain/tags.ts
+// 推荐场景词表 —— 见 src/domain/tags.ts
 // ============================================================
 export const SCENARIOS = [
-  // 旧值（向后兼容历史 items.jsonl）
+  // 旧值（仅向后兼容历史数据）
   'workplace', 'computing', 'ai', 'travel', 'daily', 'food',
-  // ── 工作 ──
-  'biz-email', 'meeting', 'interview', 'negotiation', 'slack',
-  // ── 技术 ──
+  // 工作
+  'biz-email', 'meeting', 'interview', 'negotiation', 'work-chat',
+  // 学习
+  'classroom', 'exam', 'paper-writing', 'academic-talk', 'reading',
+  // 计算机科学与 AI
   'coding', 'ai-ml', 'devops', 'data', 'system-design',
-  // ── 生活 ──
-  'shopping', 'dining', 'doctor', 'rent', 'transport',
-  // ── 文化 ──
-  'movies', 'idioms', 'festivals', 'memes',
-  // ── 学术 ──
-  'paper-writing', 'academic-talk', 'reading',
-  // ── 旅行 ──
-  'airport-hotel', 'directions', 'complaints',
+  // 日常交流
+  'small-talk', 'opinions', 'emotions', 'social-media', 'idioms',
+  // 日常生活
+  'shopping', 'doctor', 'rent', 'transport', 'errands',
+  // 文化艺术
+  'movies', 'books', 'art', 'festivals', 'memes',
+  // 游戏
+  'video-games', 'board-games', 'game-chat',
+  // 旅行
+  'airport-hotel', 'directions', 'complaints', 'sightseeing',
+  // 美食
+  'dining', 'cooking', 'coffee', 'groceries',
+  // 音乐
+  'music-listening', 'music-performance', 'instruments',
+  // 日用品
+  'household-items', 'personal-care', 'clothing',
 ] as const;
-export type Scenario = (typeof SCENARIOS)[number];
+export type Scenario = string;
+export const ScenarioSchema = z.string().trim().min(1);
 
 export const ITEM_TYPES = ['en2cn', 'cn2en', 'translate', 'cloze'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
@@ -81,7 +92,7 @@ export const ItemSchema = z
   .object({
     id: z.string(), // ulid
     type: z.enum(ITEM_TYPES),
-    scenario: z.enum(SCENARIOS),
+    scenario: ScenarioSchema,
     langTags: z.array(z.string()).default([]),
     difficulty: DifficultySchema,
 
@@ -113,7 +124,7 @@ export const GeneratedItemSchema = ItemSchema.omit({
   related: true,
   scenario: true,
 })
-  .extend({ scenario: z.enum(SCENARIOS).optional() })
+  .extend({ scenario: ScenarioSchema.optional() })
   .passthrough(); // 容忍模型偶尔多塞字段（id、fingerprint 等）
 export type GeneratedItem = z.infer<typeof GeneratedItemSchema>;
 
@@ -164,7 +175,7 @@ export const SessionSchema = z
     startedAt: z.string(),
     finishedAt: z.string().optional(),
     mode: SessionModeSchema,
-    scenario: z.enum(SCENARIOS).optional(),
+    scenario: ScenarioSchema.optional(),
     plannedMinutes: z.number().int().positive(),
     attempts: z.array(AttemptSchema).default([]),
   })
@@ -180,7 +191,7 @@ export const DraftSessionSchema = SessionSchema.passthrough();
 export const IndexEntrySchema = z
   .object({
     type: z.enum(ITEM_TYPES),
-    scenario: z.enum(SCENARIOS),
+    scenario: ScenarioSchema,
     langTags: z.array(z.string()),
     due: z.string().optional(),
     lastScore: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
@@ -215,7 +226,7 @@ export const MistakeSchema = z
     id: z.string(), // ulid
     itemId: z.string(),
     type: z.enum(ITEM_TYPES),
-    scenario: z.enum(SCENARIOS).optional(),
+    scenario: ScenarioSchema.optional(),
     prompt: z.string(), // 题面文本（cn / en / cloze 任一）
     correctAnswer: z.string(), // 参考答案
     userAnswer: z.string(),
@@ -237,7 +248,7 @@ export const DictSenseSchema = z
     pos: z.string().optional(), // n. / v. / adj. ...
     cn: z.array(z.string()).default([]), // 该 sense 的中文释义（可多个）
     definition: z.string().optional(), // 英文释义
-    scenarios: z.array(z.enum(SCENARIOS)).default([]),
+    scenarios: z.array(ScenarioSchema).default([]),
     examples: z
       .array(
         z.object({
@@ -271,14 +282,14 @@ export const DictEntrySchema = z
     estimated: z
       .object({
         difficulty: DifficultySchema.optional(),
-        scenarios: z.array(z.enum(SCENARIOS)).optional(),
+        scenarios: z.array(ScenarioSchema).optional(),
       })
       .passthrough()
       .optional(),
     aiConfirmed: z
       .object({
         difficulty: DifficultySchema.optional(),
-        scenarios: z.array(z.enum(SCENARIOS)).optional(),
+        scenarios: z.array(ScenarioSchema).optional(),
         confirmedAt: z.string().optional(),
         model: z.string().optional(),
         notes: z.string().optional(),
@@ -317,7 +328,7 @@ export function effectiveDict(d: DictEntry): {
 export const CorpusJudgementSchema = z
   .object({
     difficulty: DifficultySchema.optional(),
-    scenarios: z.array(z.enum(SCENARIOS)).optional(),
+    scenarios: z.array(ScenarioSchema).optional(),
     keywords: z.array(z.string()).optional(),
     confirmedAt: z.string().optional(), // ISO，仅 aiConfirmed 用
     model: z.string().optional(),       // 仅 aiConfirmed 用

@@ -37,22 +37,18 @@ description: 为指定学习场景从零生成词典条目（dict）和句子语
 /ingest-corpus <scenario> [--count N] [--file-dict <path>] [--file-corpus <path>]
 ```
 
-- `scenario` 必填。可用场景见下面"可选 scenarios 列表"。
+- `scenario` 必填。可以使用推荐场景，也可以输入更贴切的新场景 id。
 - `--count` 可选，默认 30（30 条 = 约 18 dict + 12 corpus）。建议 30-50，太多 LLM 上下文压力大。
 - `--file-dict` / `--file-corpus` 可选，默认 `data/dict.jsonl` / `data/corpus.jsonl`。
 
 ## 场景词表
 
-**唯一权威**是 `src/domain/tags.ts` 里的 `SCENARIO_KEYWORDS`（含场景 id、英中关键词），以及 `SCENARIO_INFO`（含 label、所属 group、hint）。当前可用场景：
+`src/domain/tags.ts` 里的 `SCENARIOS / SCENARIO_INFO / SCENARIO_KEYWORDS` 是**推荐场景词表**和启发式分类表，不是严格枚举。当前推荐大类包括：
 
-- 工作: `biz-email, meeting, interview, negotiation, slack`
-- 技术: `coding, ai-ml, devops, data, system-design`
-- 生活: `shopping, dining, doctor, rent, transport`
-- 文化: `movies, idioms, festivals, memes`
-- 学术: `paper-writing, academic-talk, reading`
-- 旅行: `airport-hotel, directions, complaints`
+- 工作、学习、计算机科学与 AI、日常交流、日常生活
+- 文化艺术、游戏、旅行、美食、音乐、日用品
 
-**如果你不确定某个场景的界定**（比如 `slack` 和 `biz-email` 的边界），直接 `Read src/domain/tags.ts` 里的 SCENARIO_KEYWORDS 和 SCENARIO_INFO 获得准确描述。
+如果已有推荐场景贴切，优先使用推荐 id；如果目标语料明显属于未覆盖的新场景，可以直接使用新的、稳定的 kebab-case 场景 id，并把它写入 `scenario` / `scenarios`。等某个新场景反复出现，再把它沉淀进 `src/domain/tags.ts` 的推荐词表与关键词表。
 
 ## 执行步骤（本仓库）
 
@@ -70,7 +66,7 @@ pnpm exec tsx .claude/skills/ingest-corpus/ingest-corpus.ts plan transport --cou
 - `dictCount / corpusCount`：各生成多少条
 - `sampleExistingLemmas`：已有 dict lemma 抽样（避免重复）
 - `sampleExistingEnKeys`：已有 corpus 英文句子抽样（避免重复）
-- `allowedScenarios`：完备的可用场景列表
+- `suggestedScenarios`：推荐场景列表；不是严格限制，AI 可补充合理新场景
 
 ### 2. AI 生成
 

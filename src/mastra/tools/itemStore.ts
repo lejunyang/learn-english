@@ -13,7 +13,7 @@ import {
   GeneratedItemSchema,
   type Item,
   type Scenario,
-  SCENARIOS,
+  ScenarioSchema,
   ITEM_TYPES,
 } from '../../domain/schemas.js';
 
@@ -24,7 +24,7 @@ export const searchItemsTool = createTool({
   id: 'itemStore.search',
   description: '搜索本地学习项。可按场景、语言学标签、题型或关键字过滤。',
   inputSchema: z.object({
-    scenario: z.enum(SCENARIOS).optional(),
+    scenario: ScenarioSchema.optional(),
     type: z.enum(ITEM_TYPES).optional(),
     tags: z.array(z.string()).optional(),
     query: z.string().optional(),

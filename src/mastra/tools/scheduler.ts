@@ -7,7 +7,7 @@ import {
 } from '../../domain/store.js';
 import {
   ScheduleEntrySchema,
-  SCENARIOS,
+  ScenarioSchema,
   type ScheduleEntry,
 } from '../../domain/schemas.js';
 import { applyReview, newEntry, isDue, overdueMs, type ReviewScore } from '../../domain/fsrs.js';
@@ -19,7 +19,7 @@ export const getDueTool = createTool({
   id: 'scheduler.getDue',
   description: '获取到期/已 overdue 的学习项，按 overdue 程度 + 历史低分优先排序。',
   inputSchema: z.object({
-    scenario: z.enum(SCENARIOS).optional(),
+    scenario: ScenarioSchema.optional(),
     limit: z.number().int().positive().max(200).default(20),
   }),
   outputSchema: z.object({

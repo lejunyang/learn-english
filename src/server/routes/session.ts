@@ -22,7 +22,7 @@ import {
   finishSession,
 } from '../sessionManager.js';
 import { ulid } from 'ulid';
-import { SCENARIOS, type Item, type Scenario } from '../../domain/schemas.js';
+import { ScenarioSchema, type Item, type Scenario } from '../../domain/schemas.js';
 
 export const sessionRoutes = new Hono();
 
@@ -31,7 +31,7 @@ export const sessionRoutes = new Hono();
 // ============================================================
 const StartBody = z.object({
   mode: z.enum(['new', 'review']),
-  scenario: z.enum(SCENARIOS).optional(),
+  scenario: ScenarioSchema.optional(),
   minutes: z.number().int().positive().max(120),
   model: z.string().optional(),
   effort: z.enum(['low', 'medium', 'high']).optional(),
