@@ -279,6 +279,7 @@ function dictToItem(
         : `首字母：${d.lemma.slice(0, 1)}`,
     },
     ...(d.ipa ? { phonetics: { ipa: d.ipa.us || d.ipa.uk || d.ipa.any } } : {}),
+    ...(sense.examples && sense.examples.length > 0 ? { examples: sense.examples } : {}),
   };
 
   return ItemSchema.parse({

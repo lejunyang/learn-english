@@ -18,6 +18,7 @@ export interface Item {
   distractors?: string[];
   hints: { weak: string; strong: string };
   phonetics?: { ipa?: string; ipaUS?: string; ipaUK?: string };
+  examples?: Array<{ en: string; cn?: string }>;
   related: string[];
   stats: { attempts: number; correct: number; lastScore?: number };
 }

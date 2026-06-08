@@ -90,6 +90,9 @@ export const ItemSchema = z
     distractors: z.array(z.string()).optional(),
     hints: HintsSchema,
     phonetics: PhoneticsSchema.optional(),
+    examples: z
+      .array(z.object({ en: z.string(), cn: z.string().optional() }))
+      .optional(),
 
     related: z.array(z.string()).default([]),
     source: ItemSourceSchema,

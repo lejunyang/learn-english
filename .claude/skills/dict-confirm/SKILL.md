@@ -74,8 +74,8 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
   "difficulty": 4,
   "scenarios": ["transport", "data"],
   "examples": [
-    { "en": "Please transfer me to the manager.", "cn": "请把我转给经理。" },
-    { "en": "You need to transfer at Central Station.", "cn": "你需要在中央车站换乘。" }
+    [{"en": "You need to transfer at Central Station.", "cn": "你需要在中央车站换乘。"}],
+    [{"en": "I'll make a bank transfer.", "cn": "我要做一笔银行转账。"}]
   ],
   "model": "claude-opus-4-7"
 }
@@ -85,7 +85,7 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
 - `lemma`: 必须，从 pending 输出原样回填
 - `difficulty`: 1..10 整数
 - `scenarios`: 受控词表；空数组表示不属于任何已知场景
-- `examples`: 0-3 条示例句。每条 `{en, cn?}`：
+- `examples`: 二维数组，`examples[i]` 对应 `senses[i]` 的例句。每条 `{en, cn?}`。可以不填所有 sense，只填你想补的
 
 可选字段：
 - `model`: 当前宿主模型名，便于审计
@@ -97,15 +97,14 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
 - 尽量覆盖不同词性 / 不同义项（`transfer` 可以是动词"转接"、名词"转账"）
 - 例句场景要与你填的 `scenarios` 匹配（transport 场景的例句用交通上下文）
 - 中文翻译贴切自然，不直译
-- 如果 pending 里 `examples` 非空（已有的 ECDICT 例句），**不要简单复读** —— 你觉得不好可以替换，觉得好可以保留
+- 当前 ECDICT 数据里 senses 的 examples 全部是空数组，所以不需要担心复读问题
 - 如果这个 lemma 很难造句（比如罕见术语 `mitochondrial`），降低要求，1 条也行
 
 ## examples 的用途
 
-教材例句会回填到 `aiConfirmed.examples`。在出题系统中，被用作：
-- 出 `cloze` 题的候选句子（挖 lemma 的变形）
-- 出 `en2cn` 题时的辅助语境提示
-- 用户点击"查看例句"时的展示内容
+教材例句会回填到对应 `senses[i].examples`。在出题系统中，被用作：
+- 用户点击"查看例句"时展示的内容（含发音）
+- 出 `cloze` 或 `en2cn` 题时的辅助语境
 
 所以例句质量直接决定出题质量。
 
@@ -158,14 +157,28 @@ AI 一次看到一个 lemma + 它**全部 senses 的中文释义合并**，给�
        "pos": ["v.","n."],
        "tags": ["cet4","ielts"],
        "sensesCn": ["[v.] 转移; 调动", "[n.] 转账"],
-       "examples": [],
        "estimated": { "difficulty": 5, "scenarios": ["transport","data"] }
      }
    ]
    ```
 
 2. **逐条判定**：对每条 `{lemma, sensesCn, estimated}` 重新评估难度、场景、并给出例句。
-   写到 `/tmp/dict-results.json`。
+   sensesCn 的顺序对应 senses[i]，你的 examples 也要按此顺序写回。写到 `/tmp/dict-results.json`：
+
+   ```json
+   [{
+     "lemma": "transfer",
+     "difficulty": 4,
+     "scenarios": ["transport", "data"],
+     "examples": [
+       [{"en": "You need to transfer at Central Station.", "cn": "你需要在中央车站换乘。"}],
+       [{"en": "I'll make a bank transfer.", "cn": "我要做一笔银行转账。"}]
+     ],
+     "model": "claude-opus-4-7"
+   }]
+   ```
+
+   `examples` 是二维数组：`examples[0]`（对应 sense[0] `[v.] 转移`）和 `examples[1]`（对应 sense[1] `[n.] 转账`）。如果你只给了一个 sense 写例句、另一个不写，把另一个的数组留空即可。
 
 3. **回写**：
    ```bash

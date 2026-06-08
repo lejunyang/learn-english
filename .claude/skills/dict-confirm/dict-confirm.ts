@@ -117,7 +117,6 @@ function summarizeEntry(e: any) {
     const pos = s.pos ? `[${s.pos}] ` : '';
     return pos + (s.cn ?? []).join('; ');
   });
-  const egs = (e.senses ?? []).flatMap((s: any) => s.examples ?? []);
   return {
     lemma: e.lemma,
     ipa: e.ipa?.us ?? e.ipa?.uk ?? e.ipa?.any,
@@ -126,7 +125,6 @@ function summarizeEntry(e: any) {
     tags: e.tags,
     frq: e.frq,
     sensesCn,
-    examples: egs.length ? egs : undefined,
     estimated: e.estimated,
   };
 }
@@ -203,10 +201,22 @@ async function cmdWrite(dir: string, input?: string) {
       const aiConfirmed: Record<string, unknown> = { confirmedAt: now };
       if (u.difficulty !== undefined) aiConfirmed.difficulty = u.difficulty;
       if (u.scenarios !== undefined) aiConfirmed.scenarios = u.scenarios;
-      if (u.examples !== undefined) aiConfirmed.examples = u.examples;
       if (u.model !== undefined) aiConfirmed.model = u.model;
       if (u.notes !== undefined) aiConfirmed.notes = u.notes;
       e.aiConfirmed = aiConfirmed;
+
+      // examples 写入对应的 senses[i].examples（按索引匹配）
+      if (Array.isArray(u.examples) && Array.isArray(e.senses)) {
+        for (let si = 0; si < u.examples.length && si < e.senses.length; si++) {
+          const exArr = u.examples[si];
+          if (Array.isArray(exArr)) {
+            e.senses[si].examples = exArr.map((ex: any) => ({
+              en: typeof ex.en === 'string' ? ex.en : '',
+              cn: typeof ex.cn === 'string' ? ex.cn : undefined,
+            }));
+          }
+        }
+      }
 
       // 判断是否需要移动到另一个分片
       const newDiff = effectiveDifficultyAfterPatch(e);

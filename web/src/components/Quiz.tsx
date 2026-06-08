@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import type { Item, TranslationGrade } from '../api';
 import { api } from '../api';
@@ -279,6 +279,41 @@ function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/[.,!?;:'"。，！？；：·’‘"「」『』（）\[\]【】—…\-]/g, '').replace(/\s+/g, ' ');
 }
 
+/** 例句展示：单词题（en2cn / cn2en）显示"查看例句"按钮，点击展示例句并有发音按钮 */
+function ExampleDisplay({ examples }: { examples?: Array<{ en: string; cn?: string }> }) {
+  const [show, setShow] = useState(false);
+  if (!examples || examples.length === 0) return null;
+  const ex = examples[0]!;
+  return (
+    <div className="mt-3">
+      <button
+        onClick={() => setShow(!show)}
+        className="text-xs px-2.5 py-1.5 rounded border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 transition"
+      >
+        {show ? '收起例句 ▲' : '查看例句 ▼'}
+      </button>
+      {show && (
+        <div className="mt-2 text-left bg-slate-50 rounded border border-slate-200 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <span className="text-sm flex-1 break-words">{ex.en}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); speak(ex.en); }}
+              className="text-xs text-blue-600 hover:text-blue-800 shrink-0 mt-0.5"
+              title="朗读"
+            >
+              🔊
+            </button>
+          </div>
+          {ex.cn && <div className="text-xs text-slate-500 mt-1">{ex.cn}</div>}
+          {examples.length > 1 && (
+            <div className="text-xs text-slate-400 mt-1.5">还有 {examples.length - 1} 条例句</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function shuffleWithSeed<T>(arr: T[], seed: string): T[] {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) & 0xffffffff;
@@ -302,14 +337,17 @@ function PromptDisplay({ item }: { item: Item }) {
         {item.phonetics?.ipa && isWordOrPhrase(text) && (
           <div className="mt-2"><Phonetics text={text} ipa={item.phonetics.ipa} /></div>
         )}
+        <ExampleDisplay examples={item.examples} />
         <div className="text-sm text-slate-500 mt-3">输入中文意思</div>
       </div>
     );
   }
   if (item.type === 'cn2en') {
+    const cn = item.prompt.cn ?? '';
     return (
       <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
-        <div className="text-xl sm:text-2xl font-medium break-words">{item.prompt.cn}</div>
+        <div className="text-xl sm:text-2xl font-medium break-words">{cn}</div>
+        <ExampleDisplay examples={item.examples} />
         <div className="text-sm text-slate-500 mt-3">输入对应的英文</div>
       </div>
     );
