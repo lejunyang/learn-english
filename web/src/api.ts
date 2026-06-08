@@ -19,6 +19,8 @@ export interface Item {
   hints: { weak: string; strong: string };
   phonetics?: { ipa?: string; ipaUS?: string; ipaUK?: string };
   examples?: Array<{ en: string; cn?: string }>;
+  userNote?: string;
+  sourceRef?: string;
   related: string[];
   stats: { attempts: number; correct: number; lastScore?: number };
 }
@@ -106,6 +108,9 @@ export const api = {
     sessionDays: number;
     mistakes?: { total: number; open: number };
   }>('/api/stats/overview'),
+
+  saveNote: (itemId: string, userNote: string) =>
+    postJSON<{ ok: boolean; userNote: string }>(`/api/items/${itemId}/note`, { userNote }),
 
   // Coach SSE
   coach(id: string, itemId: string, userAnswer: string, onDelta: (s: string) => void, onDone: () => void, onError: (e: string) => void) {

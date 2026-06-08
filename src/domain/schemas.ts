@@ -93,6 +93,8 @@ export const ItemSchema = z
     examples: z
       .array(z.object({ en: z.string(), cn: z.string().optional() }))
       .optional(),
+    userNote: z.string().optional(),
+    sourceRef: z.string().optional(), // 回写源数据用：dict 存 lemma，corpus 存 id
 
     related: z.array(z.string()).default([]),
     source: ItemSourceSchema,
@@ -284,6 +286,7 @@ export const DictEntrySchema = z
       .passthrough()
       .optional(),
     exchange: z.string().optional(), // ECDICT 词形变化原文
+    userNote: z.string().optional(),
     source: z.string(), // ecdict / oxford / ai-generated:xxx
   })
   .passthrough();
@@ -329,6 +332,7 @@ export const CorpusEntrySchema = z
     cn: z.string().optional(), // 中文翻译（可能没有）
     estimated: CorpusJudgementSchema.optional(),
     aiConfirmed: CorpusJudgementSchema.optional(),
+    userNote: z.string().optional(),
     cefr: z.string().optional(),
     source: z.string(),
   })

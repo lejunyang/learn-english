@@ -42,7 +42,18 @@ export function Quiz() {
   const resetItem = useSetAtom(resetItemStateAtom);
   const setSessionDone = useSetAtom(sessionDoneAtom);
   const setSummary = useSetAtom(summaryAtom);
+  const [noteText, setNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 当 item 切换时刷新 noteText
+  const prevItemId = useRef<string>('');
+  if (item && item.id !== prevItemId.current) {
+    prevItemId.current = item.id;
+    setNoteText(item.userNote ?? '');
+    setNoteSaved(false);
+  }
 
   const options = useMemo(() => {
     if (!item || item.type === 'translate') return null;
@@ -130,6 +141,16 @@ export function Quiz() {
       () => {},
       (e) => setCoach((c) => c + `\n[stream error: ${e}]`),
     );
+  }
+
+  async function saveNote() {
+    if (!item || noteSaving) return;
+    setNoteSaving(true);
+    try {
+      await api.saveNote(item.id, noteText);
+      setNoteSaved(true);
+    } catch { /* ignore — 静默失败，不影响学习流程 */ }
+    setNoteSaving(false);
   }
 
   async function goNext() {
@@ -253,15 +274,39 @@ export function Quiz() {
       )}
 
       {phase === 'feedback' && (
-        <Feedback
-          item={item}
-          picked={picked}
-          userAnswer={userAnswer}
-          grade={grade}
-          coach={coach}
-          onNext={goNext}
-          nextLabel={pendingNext ? '下一题 →' : '完成学习'}
-        />
+        <>
+          <Feedback
+            item={item}
+            picked={picked}
+            userAnswer={userAnswer}
+            grade={grade}
+            coach={coach}
+            onNext={goNext}
+            nextLabel={pendingNext ? '下一题 →' : '完成学习'}
+          />
+
+          {/* 用户备注 */}
+          <div className="bg-white rounded-lg shadow-sm p-4 space-y-2">
+            <div className="text-xs text-slate-500">备注（可选，不会被 AI 修改，仅你可见）</div>
+            <textarea
+              value={noteText}
+              onChange={(e) => { setNoteText(e.target.value); setNoteSaved(false); }}
+              rows={2}
+              placeholder="记录这句的学习心得、易错点…"
+              className="w-full border rounded px-3 py-2 text-sm resize-none min-h-[2.5rem]"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveNote}
+                disabled={noteSaving}
+                className="text-xs px-3 py-1.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 disabled:opacity-50"
+              >
+                {noteSaving ? '保存中…' : '保存备注'}
+              </button>
+              {noteSaved && <span className="text-xs text-green-600">已保存</span>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

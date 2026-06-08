@@ -280,6 +280,8 @@ function dictToItem(
     },
     ...(d.ipa ? { phonetics: { ipa: d.ipa.us || d.ipa.uk || d.ipa.any } } : {}),
     ...(sense.examples && sense.examples.length > 0 ? { examples: sense.examples } : {}),
+    ...(d.userNote ? { userNote: d.userNote } : {}),
+    sourceRef: d.lemma,
   };
 
   return ItemSchema.parse({
@@ -358,6 +360,8 @@ function corpusToCloze(
     id: ulid(),
     related: [],
     source: { sessionId: opts.sessionId, createdAt: new Date().toISOString(), model: 'local:corpus' },
+    ...(c.userNote ? { userNote: c.userNote } : {}),
+    sourceRef: c.id,
     stats: { attempts: 0, correct: 0 },
   });
 }
@@ -401,6 +405,8 @@ function corpusToTranslate(c: CorpusEntry, opts: { scenario: Scenario; sessionId
     id: ulid(),
     related: [],
     source: { sessionId: opts.sessionId, createdAt: new Date().toISOString(), model: 'local:corpus' },
+    ...(c.userNote ? { userNote: c.userNote } : {}),
+    sourceRef: c.id,
     stats: { attempts: 0, correct: 0 },
   });
 }

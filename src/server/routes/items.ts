@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { readAllItems } from '../../domain/store.js';
+import { readAllItems, updateItem, patchDictShard, patchCorpusShard } from '../../domain/store.js';
 import { SCENARIOS } from '../../domain/schemas.js';
 
 export const itemRoutes = new Hono();
@@ -29,4 +29,29 @@ itemRoutes.get('/', async (c) => {
     items: filtered.slice(0, limit),
     total: filtered.length,
   });
+});
+
+/** 用户备注 —— 直接回写到 item + 源数据（dict/corpus），不经 agent */
+itemRoutes.post('/:id/note', async (c) => {
+  const id = c.req.param('id');
+  const { userNote } = await c.req.json<{ userNote?: string }>();
+  if (typeof userNote !== 'string') {
+    return c.json({ error: 'userNote must be a string' }, 400);
+  }
+
+  const item = await updateItem(id, { userNote });
+  if (!item) return c.json({ error: 'item not found' }, 404);
+
+  // 如有 sourceRef，同步写回源数据
+  if (item.sourceRef) {
+    const isDict = item.source.model.includes('local:ecdict');
+    if (isDict) {
+      await patchDictShard(item.sourceRef, { userNote });
+    } else {
+      // local:corpus — sourceRef 存 corpus id
+      await patchCorpusShard(item.sourceRef, { userNote });
+    }
+  }
+
+  return c.json({ ok: true, userNote });
 });

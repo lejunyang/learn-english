@@ -498,3 +498,85 @@ export function listDictShards(): string[] {
 export function listCorpusShards(): string[] {
   return allShards(CORPUS_DIR);
 }
+
+// ============================================================
+// 用户备注回写：按 lemma 或 en 定位到分片，patch userNote
+// ============================================================
+
+/** 在 dict 分片中按 lemma 定位条目，写入 patch 字段。不改变分片位置。 */
+export async function patchDictShard(
+  lemma: string,
+  patch: Record<string, unknown>,
+): Promise<boolean> {
+  const key = lemma.toLowerCase();
+  for (const f of allShards(DICT_DIR)) {
+    const lines = await readShardRaw(f);
+    if (lines.length === 0) continue;
+    let touched = false;
+    const out: string[] = [];
+    for (const l of lines) {
+      const e = safeParseLine(l);
+      if (!e) { out.push(l); continue; }
+      const lemma = String(e.lemma ?? '').toLowerCase();
+      if (lemma === key) {
+        Object.assign(e, patch);
+        out.push(JSON.stringify(e));
+        touched = true;
+      } else {
+        out.push(l);
+      }
+    }
+    if (touched) {
+      const tmp = `${f}.tmp`;
+      await fs.writeFile(tmp, out.join('\n') + '\n', 'utf8');
+      await fs.rename(tmp, f);
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 在 corpus 分片中按 corpusId 定位条目，写入 patch 字段。不改变分片位置。 */
+export async function patchCorpusShard(
+  corpusId: string,
+  patch: Record<string, unknown>,
+): Promise<boolean> {
+  for (const f of allShards(CORPUS_DIR)) {
+    const lines = await readShardRaw(f);
+    if (lines.length === 0) continue;
+    let touched = false;
+    const out: string[] = [];
+    for (const l of lines) {
+      const e = safeParseLine(l);
+      if (!e) { out.push(l); continue; }
+      if (e.id === corpusId) {
+        Object.assign(e, patch);
+        out.push(JSON.stringify(e));
+        touched = true;
+      } else {
+        out.push(l);
+      }
+    }
+    if (touched) {
+      const tmp = `${f}.tmp`;
+      await fs.writeFile(tmp, out.join('\n') + '\n', 'utf8');
+      await fs.rename(tmp, f);
+      return true;
+    }
+  }
+  return false;
+}
+
+function safeParseLine(l: string): Record<string, unknown> | null {
+  try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; }
+}
+
+async function readShardRaw(file: string): Promise<string[]> {
+  try {
+    const text = await fs.readFile(file, 'utf8');
+    return text.split('\n').filter((l) => l.trim().length > 0);
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
