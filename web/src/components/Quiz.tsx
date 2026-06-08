@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import type { Item, TranslationGrade } from '../api';
 import { api } from '../api';
 import {
   currentItemAtom,
@@ -20,8 +19,10 @@ import {
   sessionDoneAtom,
   summaryAtom,
 } from '../state/atoms';
-import { Phonetics, WordWithAudio, isWordOrPhrase } from './Phonetics';
-import { speak } from '../speech';
+import { PromptDisplay } from './PromptDisplay';
+import { ChoiceList } from './ChoiceList';
+import { Feedback } from './Feedback';
+import { normalize, shuffleWithSeed } from './helpers';
 
 export function Quiz() {
   const sid = useAtomValue(sessionIdAtom);
@@ -42,6 +43,7 @@ export function Quiz() {
   const resetItem = useSetAtom(resetItemStateAtom);
   const setSessionDone = useSetAtom(sessionDoneAtom);
   const setSummary = useSetAtom(summaryAtom);
+
   const [noteText, setNoteText] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
@@ -149,7 +151,7 @@ export function Quiz() {
     try {
       await api.saveNote(item.id, noteText);
       setNoteSaved(true);
-    } catch { /* ignore — 静默失败，不影响学习流程 */ }
+    } catch { /* ignore */ }
     setNoteSaving(false);
   }
 
@@ -312,213 +314,9 @@ export function Quiz() {
   );
 }
 
-function correctOf(it: Item): string {
-  return (
-    (it.type === 'en2cn' ? it.answer?.cn :
-     it.type === 'cn2en' ? it.answer?.en :
-     it.answer?.en) ?? ''
-  );
-}
-
-function normalize(s: string): string {
-  return s.trim().toLowerCase().replace(/[.,!?;:'"。，！？；：·’‘"「」『』（）\[\]【】—…\-]/g, '').replace(/\s+/g, ' ');
-}
-
-/** 例句展示：单词题（en2cn / cn2en）显示"查看例句"按钮，点击展示例句并有发音按钮 */
-function ExampleDisplay({ examples }: { examples?: Array<{ en: string; cn?: string }> }) {
-  const [show, setShow] = useState(false);
-  if (!examples || examples.length === 0) return null;
-  const ex = examples[0]!;
-  return (
-    <div className="mt-3">
-      <button
-        onClick={() => setShow(!show)}
-        className="text-xs px-2.5 py-1.5 rounded border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 transition"
-      >
-        {show ? '收起例句 ▲' : '查看例句 ▼'}
-      </button>
-      {show && (
-        <div className="mt-2 text-left bg-slate-50 rounded border border-slate-200 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <span className="text-sm flex-1 break-words">{ex.en}</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); speak(ex.en); }}
-              className="text-xs text-blue-600 hover:text-blue-800 shrink-0 mt-0.5"
-              title="朗读"
-            >
-              🔊
-            </button>
-          </div>
-          {ex.cn && <div className="text-xs text-slate-500 mt-1">{ex.cn}</div>}
-          {examples.length > 1 && (
-            <div className="text-xs text-slate-400 mt-1.5">还有 {examples.length - 1} 条例句</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function shuffleWithSeed<T>(arr: T[], seed: string): T[] {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) & 0xffffffff;
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    h = (h * 9301 + 49297) & 0xffffffff;
-    const j = Math.abs(h) % (i + 1);
-    [a[i], a[j]] = [a[j]!, a[i]!];
-  }
-  return a;
-}
-
-function PromptDisplay({ item }: { item: Item }) {
-  if (item.type === 'en2cn') {
-    const text = item.prompt.en ?? '';
-    return (
-      <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
-        <div className="text-2xl sm:text-3xl font-medium break-words">
-          <button onClick={() => speak(text)} className="hover:text-blue-600">{text} 🔊</button>
-        </div>
-        {item.phonetics?.ipa && isWordOrPhrase(text) && (
-          <div className="mt-2"><Phonetics text={text} ipa={item.phonetics.ipa} /></div>
-        )}
-        <ExampleDisplay examples={item.examples} />
-        <div className="text-sm text-slate-500 mt-3">输入中文意思</div>
-      </div>
-    );
-  }
-  if (item.type === 'cn2en') {
-    const cn = item.prompt.cn ?? '';
-    return (
-      <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
-        <div className="text-xl sm:text-2xl font-medium break-words">{cn}</div>
-        <ExampleDisplay examples={item.examples} />
-        <div className="text-sm text-slate-500 mt-3">输入对应的英文</div>
-      </div>
-    );
-  }
-  if (item.type === 'translate') {
-    return (
-      <div className="bg-white rounded-lg shadow-sm p-5">
-        <div className="text-lg sm:text-xl font-medium break-words">{item.prompt.cn}</div>
-        <div className="text-sm text-slate-500 mt-2">请输入英文翻译</div>
-      </div>
-    );
-  }
-  return (
-    <div className="bg-white rounded-lg shadow-sm p-5 sm:p-6 text-center">
-      <div className="text-lg sm:text-xl font-medium break-words">{item.prompt.cloze}</div>
-      <div className="text-sm text-slate-500 mt-3">输入填空词</div>
-    </div>
-  );
-}
-
-function ChoiceList({
-  options, picked, correct, phase, onPick,
-}: {
-  options: string[]; picked: string | null; correct: string;
-  phase: 'answering' | 'feedback'; onPick: (s: string) => void;
-}) {
-  if (phase === 'feedback') {
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {options.map((opt) => {
-          const isCorrect = normalize(opt) === normalize(correct);
-          const isPicked = picked === opt;
-          let cls = 'bg-white border-slate-200';
-          if (isCorrect) cls = 'bg-green-50 border-green-400';
-          else if (isPicked) cls = 'bg-red-50 border-red-400';
-          else cls = 'bg-white border-slate-200 opacity-60';
-          return (
-            <div key={opt} className={`text-left px-4 py-3 rounded border ${cls} transition`}>
-              {opt}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="text-xs text-slate-400 mb-1.5">点击选项快速作答：</div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {options.map((opt) => (
-          <button
-            key={opt}
-            onClick={() => onPick(opt)}
-            className="text-left px-4 py-3.5 rounded border bg-white border-slate-200 hover:bg-slate-50 transition min-h-11"
-          >
-            {opt}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Feedback({
-  item, picked, userAnswer, grade, coach, onNext, nextLabel,
-}: {
-  item: Item; picked: string | null; userAnswer: string;
-  grade: TranslationGrade | null; coach: string;
-  onNext: () => void; nextLabel: string;
-}) {
-  const answerEn = item.answer?.en;
-  const answerCn = item.answer?.cn;
-  const isTranslate = item.type === 'translate';
-  const correct =
-    item.type === 'en2cn' ? answerCn :
-    item.type === 'cn2en' ? answerEn :
-    item.answer?.en;
-  const isRight = picked ? normalize(picked) === normalize(correct ?? '') : false;
-
-  return (
-    <div className="space-y-3 bg-slate-50 rounded-lg p-4">
-      {isTranslate && grade && (
-        <div>
-          <div className="font-medium">评分：{grade.score} / 3</div>
-          <div className="text-xs text-slate-500">
-            语义 {grade.semantic} · 语法 {grade.grammar} · 地道 {grade.naturalness}
-          </div>
-          <div className="mt-2 text-sm">{grade.feedback}</div>
-          {answerEn && (
-            <div className="text-sm mt-2">
-              参考译文：<WordWithAudio text={answerEn} />
-            </div>
-          )}
-          <div className="text-xs text-slate-500 mt-1">你的翻译：{userAnswer}</div>
-        </div>
-      )}
-
-      {!isTranslate && (
-        <div className="text-sm">
-          <div className={isRight ? 'text-green-700 font-medium' : 'text-red-700 font-medium'}>
-            {isRight ? '✓ 正确' : '✗ 错误'}
-          </div>
-          <div className="mt-1">
-            正确答案：
-            {item.type === 'en2cn' ? <strong>{answerCn}</strong> :
-              <WordWithAudio text={answerEn ?? ''} ipa={item.phonetics?.ipa} />}
-          </div>
-          {picked && (
-            <div className="text-slate-500 mt-1">你的回答：{picked}</div>
-          )}
-        </div>
-      )}
-
-      {coach && (
-        <div className="text-sm text-slate-700 bg-white border-l-4 border-blue-300 px-3 py-2.5 whitespace-pre-wrap">
-          {coach}
-        </div>
-      )}
-
-      <button
-        onClick={onNext}
-        className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-lg font-medium min-h-12"
-      >
-        {nextLabel}
-      </button>
-    </div>
-  );
+function correctOf(item: import('../api').Item): string {
+  const ans = item.answer;
+  return item.type === 'en2cn' ? ans?.cn ?? '' :
+         item.type === 'cn2en' ? ans?.en ?? '' :
+         ans?.en ?? '';
 }
