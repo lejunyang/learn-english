@@ -6,6 +6,8 @@
  *
  * corpus 按 difficulty 分片存储：<dir>/d1.jsonl..d10.jsonl
  *
+ * **shard 移动**：若 AI 判定的 difficulty 与当前分片不一致，自动迁移条目。
+ *
  * 子命令：
  *
  *   corpus-confirm pending [--dir data/corpus] [--limit 20]
@@ -14,7 +16,7 @@
  *
  *   corpus-confirm write [--dir data/corpus] [--input results.json | stdin]
  *     → 把 results 中每条 {id, difficulty, scenarios, keywords, ...} 回填到 aiConfirmed
- *     遍历所有分片定位 id，分片级原子写入（先 .tmp 再 rename）
+ *     遍历所有分片定位 id，分片级原子 rename + 分片间自动迁移
  *
  *   corpus-confirm stats [--dir data/corpus]
  *     → 打印 {total, confirmed, pending, untouched}
@@ -65,6 +67,14 @@ function shardFiles(dir: string): string[] {
   return out;
 }
 
+function shardPath(dir: string, difficulty: number): string {
+  return path.join(dir, `d${clampDifficulty(difficulty)}.jsonl`);
+}
+
+function clampDifficulty(d: number): number {
+  return Math.max(DIFFICULTY_MIN, Math.min(DIFFICULTY_MAX, Math.round(d)));
+}
+
 async function readJsonlIfExists(file: string): Promise<string[]> {
   try {
     await fs.access(file);
@@ -86,6 +96,15 @@ function safeParse(line: string): any | null {
 function needsConfirm(e: any): boolean {
   if (e.aiConfirmed) return false;
   return !!e.estimated;
+}
+
+// 计算 post-patch 的 effective difficulty：ai.difficulty ?? est.difficulty ?? 1
+function effectiveDifficulty(e: any): number {
+  const ai = e.aiConfirmed;
+  if (ai && typeof ai.difficulty === 'number') return clampDifficulty(ai.difficulty);
+  const est = e.estimated;
+  if (est && typeof est.difficulty === 'number') return clampDifficulty(est.difficulty);
+  return DIFFICULTY_MIN;
 }
 
 async function cmdPending(dir: string, limit?: number) {
@@ -141,7 +160,9 @@ async function cmdWrite(dir: string, input?: string) {
   }
   const now = new Date().toISOString();
   let patched = 0;
-  // 遍历所有分片；每个分片若命中任何 id 就改写，原子 rename
+  // 缓冲需要在分片间迁移的条目（key=id → JSON string）
+  const moves: Map<string, string> = new Map();
+
   for (const f of shardFiles(dir)) {
     const lines = await readJsonlIfExists(f);
     if (lines.length === 0) continue;
@@ -152,6 +173,7 @@ async function cmdWrite(dir: string, input?: string) {
       if (!e || !e.id) { outLines.push(l); continue; }
       const u = byId.get(e.id);
       if (!u) { outLines.push(l); continue; }
+
       const aiConfirmed: Record<string, unknown> = { confirmedAt: now };
       if (u.difficulty !== undefined) aiConfirmed.difficulty = u.difficulty;
       if (u.scenarios !== undefined) aiConfirmed.scenarios = u.scenarios;
@@ -159,7 +181,15 @@ async function cmdWrite(dir: string, input?: string) {
       if (u.model !== undefined) aiConfirmed.model = u.model;
       if (u.notes !== undefined) aiConfirmed.notes = u.notes;
       e.aiConfirmed = aiConfirmed;
-      outLines.push(JSON.stringify(e));
+
+      // 判断是否要跨分片迁移
+      const newDiff = effectiveDifficulty(e);
+      const targetShard = shardPath(dir, newDiff);
+      if (targetShard !== f) {
+        moves.set(e.id, JSON.stringify(e));
+      } else {
+        outLines.push(JSON.stringify(e));
+      }
       byId.delete(e.id);
       patched++;
       touched = true;
@@ -170,9 +200,27 @@ async function cmdWrite(dir: string, input?: string) {
       await fs.rename(tmp, f);
     }
   }
+
+  // 写入迁移到目标分片的条目
+  if (moves.size > 0) {
+    const byTarget = new Map<string, string[]>();
+    for (const [, entryJson] of moves) {
+      const e = safeParse(entryJson);
+      if (!e) continue;
+      const diff = effectiveDifficulty(e);
+      const tf = shardPath(dir, diff);
+      const arr = byTarget.get(tf) ?? [];
+      arr.push(entryJson);
+      byTarget.set(tf, arr);
+    }
+    for (const [tf, lines] of byTarget) {
+      await fs.appendFile(tf, lines.join('\n') + '\n', 'utf8');
+    }
+  }
+
   const unknown = byId.size;
-  console.error(`[corpus-confirm] write: patched=${patched} unknown=${unknown}`);
-  console.log(JSON.stringify({ patched, unknown }));
+  console.error(`[corpus-confirm] write: patched=${patched} moved=${moves.size} unknown=${unknown}`);
+  console.log(JSON.stringify({ patched, moved: moves.size, unknown }));
 }
 
 async function cmdStats(dir: string) {

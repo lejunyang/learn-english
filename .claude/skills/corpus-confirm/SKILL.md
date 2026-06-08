@@ -124,11 +124,13 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
    - 重新挑 keywords（要适合考核：动词短语、固定搭配、专业名词优先；冠词/代词/be 动词/情态动词不要）
    - 把结果写到一个数组：`[{id, difficulty, scenarios, keywords, model?, notes?}, ...]`，保存到 `/tmp/corpus-results.json`
 
-3. **回写**：
+3. **回写**（**注意：分片自动迁移**）：
    ```bash
    pnpm exec tsx .claude/skills/corpus-confirm/corpus-confirm.ts write --input /tmp/corpus-results.json
    ```
-   原子写回 `data/corpus.jsonl`，stdout 打印 `{"patched": N, "unknown": M}`。把数字告诉用户。
+   遍历 d1.jsonl..d10.jsonl 按 id 定位，分片级原子 rename。
+   若你判定的 `difficulty` 与原分片不符，条目**自动迁移**到正确的分片。
+   stdout 打印 `{"patched": N, "moved": M, "unknown": U}`。把数字告诉用户。
 
 4. **统计 / 决定是否继续**：
    ```bash
@@ -145,7 +147,7 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 
 整个 skill 目录是自包含的：复制 `.claude/skills/corpus-confirm/` 到任何 Node 项目，安装 `tsx`（可选，也可先 `tsc` 编一下）即可使用。脚本只依赖 Node 标准库，不依赖项目内任何模块。
 
-任何 AI agent 环境只要能读 `data/corpus.jsonl`、能写一个 JSONL 文件，就能复用本 skill。把上面两条命令换成等价的 Python/Node/Bash 脚本即可，**字段语义和文件位置保持一致**。
+任何 AI agent 环境只要能读 `data/corpus/d1..d10.jsonl`、能写 JSONL 文件，就能复用本 skill。把上面两条命令换成等价的 Python/Node/Bash 脚本即可，**字段语义和文件位置保持一致**。
 
 ## 质量守则
 
@@ -158,5 +160,6 @@ Tatoeba 里有大量纯生活闲聊、运动、学习、情感表达、宠物、
 ## 注意
 
 - 单条句子大约 100-500 tokens。一次 30 条 = 大约 3K-15K tokens。
-- 写回是原子的（先写 `.tmp` 再 rename），中断不会损坏文件。
-- 已 `aiConfirmed` 过的条目不会再次出现在 pending 列表里；要强制重判需手动从 jsonl 里删除该条目的 `aiConfirmed` 字段。
+- 写回是分片级原子的（先写 `.tmp` 再 rename），中断不会损坏文件。
+- 若你判定的 `difficulty` 与原分片不同，条目会被**自动迁移**到正确分片（`write` 输出的 `moved` 计数）。
+- 已 `aiConfirmed` 过的条目不会再次出现在 pending 列表里；要强制重判需手动从对应的分片 jsonl 里删除该条目的 `aiConfirmed` 字段。

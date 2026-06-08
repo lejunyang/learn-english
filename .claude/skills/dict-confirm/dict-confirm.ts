@@ -2,22 +2,25 @@
  * 通用 dict-confirm 辅助 CLI（0 token，纯 I/O）。
  *
  * 为通用 skill `/dict-confirm` 服务：让宿主 agent 自己复核 dict 词条
- * 的 difficulty / scenarios（lemma 级），脚本只负责"取批"和"回写"。
+ * 的 difficulty / scenarios（lemma 级）并生成示例例句，脚本只负责"取批"和"回写"。
  *
  * dict 按 difficulty 分片：<dir>/d1.jsonl..d10.jsonl
  *
  * 复核粒度：**lemma 级**。AI 一次看 lemma + 所有 senses 的中文释义合并；
- * 写到 entry.aiConfirmed.{difficulty, scenarios}（顶层）。
+ * 写到 entry.aiConfirmed.{difficulty, scenarios, examples}（顶层）。
+ *
+ * **shard 移动**：若 aiConfirmed.difficulty 与当前分片不一致，自动把条目移入
+ * 正确的分片并删除旧分片中的行。
  *
  * 子命令：
  *
  *   dict-confirm pending [--dir data/dict] [--limit 30]
- *     → JSON 数组到 stdout：[{lemma, ipa, pos, sensesCn, estimated, tags?, frq?}]
+ *     → JSON 数组到 stdout：[{lemma, ipa, pos, sensesCn, examples?, estimated, tags?, frq?}]
  *     stderr: pending=N returning=M
  *
  *   dict-confirm write [--dir data/dict] [--input results.json | stdin]
- *     → 数组：[{lemma, difficulty, scenarios, model?, notes?}]
- *     按 lemma 在所有分片中定位，分片级原子写
+ *     → 数组：[{lemma, difficulty, scenarios, examples?, model?, notes?}]
+ *     按 lemma 在所有分片中定位，分片级原子写 + 分片间自动迁移
  *
  *   dict-confirm stats [--dir data/dict]
  *     → {total, confirmed, pending, untouched}
@@ -65,6 +68,14 @@ function shardFiles(dir: string): string[] {
   return out;
 }
 
+function shardPath(dir: string, difficulty: number): string {
+  return path.join(dir, `d${clampDifficulty(difficulty)}.jsonl`);
+}
+
+function clampDifficulty(d: number): number {
+  return Math.max(DIFFICULTY_MIN, Math.min(DIFFICULTY_MAX, Math.round(d)));
+}
+
 async function readJsonlIfExists(file: string): Promise<string[]> {
   try {
     await fs.access(file);
@@ -88,12 +99,25 @@ function needsConfirm(e: any): boolean {
   return !!e.estimated;
 }
 
+/**
+ * 在 post-patch 的 entry 上计算出新的 effective difficulty：
+ * ai.difficulty ?? est.difficulty ?? DIFFICULTY_MIN
+ */
+function effectiveDifficultyAfterPatch(e: any): number {
+  const ai = e.aiConfirmed;
+  if (ai && typeof ai.difficulty === 'number') return clampDifficulty(ai.difficulty);
+  const est = e.estimated;
+  if (est && typeof est.difficulty === 'number') return clampDifficulty(est.difficulty);
+  return DIFFICULTY_MIN;
+}
+
 function summarizeEntry(e: any) {
   // 把每个 sense 的中文释义压缩成 "[pos] cn1;cn2" 形式，AI 看着省 token
   const sensesCn = (e.senses ?? []).map((s: any) => {
     const pos = s.pos ? `[${s.pos}] ` : '';
     return pos + (s.cn ?? []).join('; ');
   });
+  const egs = (e.senses ?? []).flatMap((s: any) => s.examples ?? []);
   return {
     lemma: e.lemma,
     ipa: e.ipa?.us ?? e.ipa?.uk ?? e.ipa?.any,
@@ -102,6 +126,7 @@ function summarizeEntry(e: any) {
     tags: e.tags,
     frq: e.frq,
     sensesCn,
+    examples: egs.length ? egs : undefined,
     estimated: e.estimated,
   };
 }
@@ -159,6 +184,9 @@ async function cmdWrite(dir: string, input?: string) {
   }
   const now = new Date().toISOString();
   let patched = 0;
+  // 缓冲要在分片间迁移的条目（key=lemmaLowerCase → full entry JSON string）
+  const moves: Map<string, string> = new Map();
+
   for (const f of shardFiles(dir)) {
     const lines = await readJsonlIfExists(f);
     if (lines.length === 0) continue;
@@ -167,18 +195,32 @@ async function cmdWrite(dir: string, input?: string) {
     for (const l of lines) {
       const e = safeParse(l);
       if (!e || typeof e.lemma !== 'string') { outLines.push(l); continue; }
-      const u = byLemma.get(e.lemma.toLowerCase());
+      const lemmaKey = e.lemma.toLowerCase();
+      const u = byLemma.get(lemmaKey);
       if (!u) { outLines.push(l); continue; }
+
+      // 构造 aiConfirmed
       const aiConfirmed: Record<string, unknown> = { confirmedAt: now };
       if (u.difficulty !== undefined) aiConfirmed.difficulty = u.difficulty;
       if (u.scenarios !== undefined) aiConfirmed.scenarios = u.scenarios;
+      if (u.examples !== undefined) aiConfirmed.examples = u.examples;
       if (u.model !== undefined) aiConfirmed.model = u.model;
       if (u.notes !== undefined) aiConfirmed.notes = u.notes;
       e.aiConfirmed = aiConfirmed;
-      outLines.push(JSON.stringify(e));
-      byLemma.delete(e.lemma.toLowerCase());
+
+      // 判断是否需要移动到另一个分片
+      const newDiff = effectiveDifficultyAfterPatch(e);
+      const targetShard = shardPath(dir, newDiff);
+      if (targetShard !== f) {
+        // 从当前分片删除（不 push 到 outLines），缓冲到 moves
+        moves.set(lemmaKey, JSON.stringify(e));
+        touched = true;
+      } else {
+        outLines.push(JSON.stringify(e));
+        touched = true;
+      }
+      byLemma.delete(lemmaKey);
       patched++;
-      touched = true;
     }
     if (touched) {
       const tmp = `${f}.tmp`;
@@ -186,9 +228,28 @@ async function cmdWrite(dir: string, input?: string) {
       await fs.rename(tmp, f);
     }
   }
+
+  // 写入迁移到目标分片的条目
+  if (moves.size > 0) {
+    // 按目标分片分组
+    const byTarget = new Map<string, string[]>();
+    for (const [, entryJson] of moves) {
+      const e = safeParse(entryJson);
+      if (!e) continue;
+      const diff = effectiveDifficultyAfterPatch(e);
+      const tf = shardPath(dir, diff);
+      const arr = byTarget.get(tf) ?? [];
+      arr.push(entryJson);
+      byTarget.set(tf, arr);
+    }
+    for (const [tf, lines] of byTarget) {
+      await fs.appendFile(tf, lines.join('\n') + '\n', 'utf8');
+    }
+  }
+
   const unknown = byLemma.size;
-  console.error(`[dict-confirm] write: patched=${patched} unknown=${unknown}`);
-  console.log(JSON.stringify({ patched, unknown }));
+  console.error(`[dict-confirm] write: patched=${patched} moved=${moves.size} unknown=${unknown}`);
+  console.log(JSON.stringify({ patched, moved: moves.size, unknown }));
 }
 
 async function cmdStats(dir: string) {
