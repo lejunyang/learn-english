@@ -83,6 +83,8 @@ export async function generateItems(opts: {
   recentMistakes?: Array<{ prompt: string; correctAnswer: string; userAnswer: string; suggestion?: string }>;
   // 临时覆盖模型 id（来自前端 session 选择）
   modelId?: string;
+  difficultyMin?: number;
+  difficultyMax?: number;
 }): Promise<{ items: GeneratedItem[]; model: string }> {
   const mix = opts.typeMix ?? { en2cn: 0.35, cn2en: 0.35, translate: 0.15, cloze: 0.15 };
   const dist = Object.entries(mix)
@@ -100,12 +102,18 @@ export async function generateItems(opts: {
         .join('\n')}`
     : '';
 
+  const difficultyMin = opts.difficultyMin ?? 1;
+  const difficultyMax = opts.difficultyMax ?? 10;
+  const difficultyHint = difficultyMin !== 1 || difficultyMax !== 10
+    ? `\n\n难度范围：只生成 difficulty 在 ${difficultyMin}~${difficultyMax} 之间的题目。`
+    : '';
+
   const prompt = `场景：${scenarioLabel(opts.scenario)}（${opts.scenario}）
 请生成 ${opts.count} 条题目。
 
-**JSON 输出契约**：最外层是 \`{ "items": [...] }\`，items 是题目数组，每条题目按 schema 字段填写。**严禁**用 "questions" 等其他键名。
+**JSON 输出契约**：最外层是 \`{ "items": [...] }\`，items 是题目数组，每条题目按 schema 字段填写。**严禁**用 "questions" 或其他键名。
 
-题型分布建议：${dist}。${mistakeHint}${fpHint}`;
+题型分布建议：${dist}。${difficultyHint}${mistakeHint}${fpHint}`;
 
   const usedModelId = opts.modelId || MODEL_IDS.generator;
   const res = await agent.generate(prompt, {

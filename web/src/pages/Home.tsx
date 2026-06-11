@@ -27,6 +27,8 @@ export function Home() {
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium');
   const [aiRatio, setAiRatio] = useState<number>(0); // 0 = 全本地，1 = 全 AI
   const [minutes, setMinutes] = useState<number>(10);
+  const [difficultyMin, setDifficultyMin] = useState<number>(4);
+  const [difficultyMax, setDifficultyMax] = useState<number>(6);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -59,6 +61,8 @@ export function Home() {
         model: model || undefined,
         effort,
         aiRatio,
+        difficultyMin,
+        difficultyMax,
       });
       if (res.error || !res.sessionId) {
         setErr(res.error ?? '没有可用题目');
@@ -235,6 +239,57 @@ export function Home() {
             ))}
           </div>
         </div>
+
+        {/* 难度范围 (仅新学习) */}
+        {mode === 'new' && (
+          <div>
+            <div className="text-sm text-slate-600 mb-2">难度范围：{difficultyMin} ~ {difficultyMax}</div>
+            <div className="flex gap-2">
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={difficultyMin}
+                onChange={(e) => {
+                  const newMin = parseInt(e.target.value, 10);
+                  if (newMin <= difficultyMax) {
+                    setDifficultyMin(newMin);
+                  } else {
+                    setDifficultyMin(difficultyMax);
+                  }
+                }}
+                className="flex-1"
+              />
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={difficultyMax}
+                onChange={(e) => {
+                  const newMax = parseInt(e.target.value, 10);
+                  if (newMax >= difficultyMin) {
+                    setDifficultyMax(newMax);
+                  } else {
+                    setDifficultyMax(difficultyMin);
+                  }
+                }}
+                className="flex-1"
+              />
+            </div>
+            <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <span>1</span>
+              <span>2</span>
+              <span>3</span>
+              <span>4</span>
+              <span>5</span>
+              <span>6</span>
+              <span>7</span>
+              <span>8</span>
+              <span>9</span>
+              <span>10</span>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={start}

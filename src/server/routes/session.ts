@@ -36,13 +36,15 @@ const StartBody = z.object({
   model: z.string().optional(),
   effort: z.enum(['low', 'medium', 'high']).optional(),
   aiRatio: z.number().min(0).max(1).optional(),
+  difficultyMin: z.number().int().min(1).max(10).optional(),
+  difficultyMax: z.number().int().min(1).max(10).optional(),
 });
 
 sessionRoutes.post('/start', async (c) => {
   const parsed = StartBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  const { mode, scenario, minutes, model, effort, aiRatio } = parsed.data;
+  const { mode, scenario, minutes, model, effort, aiRatio, difficultyMin, difficultyMax } = parsed.data;
   const sessionId = ulid();
 
   let queue: Item[];
@@ -50,7 +52,7 @@ sessionRoutes.post('/start', async (c) => {
 
   if (mode === 'new') {
     if (!scenario) return c.json({ error: 'scenario required for mode=new' }, 400);
-    const result = await runNewLearning({ scenario, minutes, sessionId, modelId: model, effort, aiRatio });
+    const result = await runNewLearning({ scenario, minutes, sessionId, modelId: model, effort, aiRatio, difficultyMin, difficultyMax });
     queue = result.created;
     meta = {
       requested: result.requested,

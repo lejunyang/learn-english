@@ -30,6 +30,8 @@ export interface NewLearningInput {
   effort?: 'low' | 'medium' | 'high';
   /** AI 占比 0~1。默认 0 = 全本地，1 = 全 AI。本地不足会自动用 AI 补到 count */
   aiRatio?: number;
+  difficultyMin?: number;
+  difficultyMax?: number;
 }
 
 export interface NewLearningOutput {
@@ -58,12 +60,18 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
 
   const fps = await existingFingerprints();
 
+  // 难度范围
+  const difficultyMin = input.difficultyMin ?? 1;
+  const difficultyMax = input.difficultyMax ?? 10;
+  const difficulties = Array.from({ length: difficultyMax - difficultyMin + 1 }, (_, i) => difficultyMin + i);
+
   // ── 本地拼装 ──
   const localItems = await assembleLocalItems({
     scenario: input.scenario,
     desired: localTarget,
     sessionId: input.sessionId,
     fingerprints: fps,
+    difficulties,
   });
   // 本地实际能给的数量 (≤ localTarget)；不足的部分由 AI 补
   const aiNeeded = count - localItems.length;
@@ -90,6 +98,8 @@ export async function runNewLearning(input: NewLearningInput): Promise<NewLearni
       existingFingerprints: Array.from(fps),
       recentMistakes,
       modelId: input.modelId,
+      difficultyMin,
+      difficultyMax,
     });
     aiGeneratedCount = generated.length;
     const deduped = dedupeGenerated(generated, fps);
@@ -161,6 +171,7 @@ async function assembleLocalItems(opts: {
   desired: number;
   sessionId: string;
   fingerprints: Set<string>;
+  difficulties: number[];
 }): Promise<Item[]> {
   if (opts.desired <= 0) return [];
 
@@ -168,17 +179,17 @@ async function assembleLocalItems(opts: {
   const out: Item[] = [];
 
   // dict 候选：先按 scenario 取，不够则放宽
-  let dictPool = await pickDictBy({ scenario: opts.scenario, limit: 500 });
+  let dictPool = await pickDictBy({ scenario: opts.scenario, difficulty: opts.difficulties, limit: 500 });
   if (dictPool.length < opts.desired * 0.5) {
     // 场景命中太少 → 用通用高质量词补
-    const extra = await pickDictBy({ limit: 500 });
+    const extra = await pickDictBy({ difficulty: opts.difficulties, limit: 500 });
     const seen = new Set(dictPool.map((d) => d.lemma.toLowerCase()));
     for (const d of extra) {
       if (!seen.has(d.lemma.toLowerCase())) dictPool.push(d);
       if (dictPool.length >= 500) break;
     }
   }
-  const corpusPool = await pickCorpusBy({ scenario: opts.scenario, limit: 200 });
+  const corpusPool = await pickCorpusBy({ scenario: opts.scenario, difficulty: opts.difficulties, limit: 200 });
 
   // 没有任何本地数据 → 返回空，让 AI 全部接手
   if (dictPool.length === 0 && corpusPool.length === 0) return out;
