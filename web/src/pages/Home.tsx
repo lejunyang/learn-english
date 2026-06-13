@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 
@@ -39,7 +39,7 @@ export function Home() {
         setScenarioGroups(sc.groups);
         if (sc.groups[0]) {
           setActiveGroup(sc.groups[0].group);
-          if (sc.groups[0].items[0]) setScenario(sc.groups[0].items[0].id);
+          setScenario(sc.groups[0].items[0]?.id ?? '');
         }
         setModels(md.models);
         setDefaultModel(md.defaults.generator);
@@ -48,7 +48,23 @@ export function Home() {
       .catch((e) => setErr((e as Error).message));
   }, []);
 
+  useEffect(() => {
+    if (mode !== 'new' || scenario) return;
+    const group = scenarioGroups.find((g) => g.group === activeGroup) ?? scenarioGroups[0];
+    if (group) {
+      setActiveGroup(group.group);
+      setScenario(group.items[0]?.id ?? '');
+    }
+  }, [activeGroup, mode, scenario, scenarioGroups]);
+
   const currentGroupItems = scenarioGroups.find((g) => g.group === activeGroup)?.items ?? [];
+  const difficultyRangeStyle = useMemo(
+    () => ({
+      left: `${((difficultyMin - 1) / 9) * 100}%`,
+      right: `${((10 - difficultyMax) / 9) * 100}%`,
+    }),
+    [difficultyMin, difficultyMax],
+  );
 
   async function start() {
     setErr(null);
@@ -88,7 +104,10 @@ export function Home() {
             {(['new', 'review'] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => setMode(m)}
+                onClick={() => {
+                  setMode(m);
+                  if (m === 'review') setScenario('');
+                }}
                 className={`flex-1 px-4 py-2.5 rounded border text-sm sm:text-base ${
                   mode === m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700'
                 }`}
@@ -111,7 +130,7 @@ export function Home() {
                 key={g.group}
                 onClick={() => {
                   setActiveGroup(g.group);
-                  if (g.items[0]) setScenario(g.items[0].id);
+                  setScenario(mode === 'new' ? (g.items[0]?.id ?? '') : '');
                 }}
                 className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap border ${
                   activeGroup === g.group
@@ -142,7 +161,7 @@ export function Home() {
               {currentGroupItems.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => setScenario(s.id)}
+                  onClick={() => setScenario(mode === 'review' && scenario === s.id ? '' : s.id)}
                   title={s.hint}
                   className={`px-3 py-2.5 rounded border text-sm text-left ${
                     scenario === s.id
@@ -244,36 +263,25 @@ export function Home() {
         {mode === 'new' && (
           <div>
             <div className="text-sm text-slate-600 mb-2">难度范围：{difficultyMin} ~ {difficultyMax}</div>
-            <div className="flex gap-2">
+            <div className="relative h-10 overflow-hidden">
+              <div className="absolute inset-x-3 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-200">
+                <div className="absolute top-0 h-2 rounded-full bg-blue-500" style={difficultyRangeStyle} />
+              </div>
               <input
                 type="range"
                 min={1}
                 max={10}
                 value={difficultyMin}
-                onChange={(e) => {
-                  const newMin = parseInt(e.target.value, 10);
-                  if (newMin <= difficultyMax) {
-                    setDifficultyMin(newMin);
-                  } else {
-                    setDifficultyMin(difficultyMax);
-                  }
-                }}
-                className="flex-1"
+                onChange={(e) => setDifficultyMin(Math.min(parseInt(e.target.value, 10), difficultyMax))}
+                className="pointer-events-none absolute inset-x-3 top-1/2 block w-[calc(100%-1.5rem)] -translate-y-1/2 appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-blue-600 [&::-webkit-slider-runnable-track]:appearance-none [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600"
               />
               <input
                 type="range"
                 min={1}
                 max={10}
                 value={difficultyMax}
-                onChange={(e) => {
-                  const newMax = parseInt(e.target.value, 10);
-                  if (newMax >= difficultyMin) {
-                    setDifficultyMax(newMax);
-                  } else {
-                    setDifficultyMax(difficultyMin);
-                  }
-                }}
-                className="flex-1"
+                onChange={(e) => setDifficultyMax(Math.max(parseInt(e.target.value, 10), difficultyMin))}
+                className="pointer-events-none absolute inset-x-3 top-1/2 block w-[calc(100%-1.5rem)] -translate-y-1/2 appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-blue-600 [&::-webkit-slider-runnable-track]:appearance-none [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600"
               />
             </div>
             <div className="flex justify-between text-xs text-slate-400 mt-1">

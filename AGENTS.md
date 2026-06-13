@@ -329,20 +329,25 @@ data/raw/cmn-eng_links.tsv.bz2 ─┘
 - `data/dict/` 和 `data/corpus/` **进 git 跟踪**（按 difficulty 分片后单文件最大约 6MB，可接受）。`data/raw/` 仍 gitignore（原始 bz2/csv 太大）。
 - `data/drafts/` 也 gitignore（运行时临时草稿）。
 
-### 5.4 与 LLM 协作
+### 5.4 前端样式
+
+- 写样式时优先按移动端宽度检查，不要假设桌面宽度；控件必须能在窄屏容器内收缩。
+- 避免固定宽度和会撑开布局的长内容；自定义 `range`、tab、按钮组等控件要确认端点、thumb、间距不会溢出屏幕。
+
+### 5.5 与 LLM 协作
 
 - 出题 / 评分 / 讲解 三类 agent 各用一个模型 id（generator/grader/coach）。**不要**让 generator 兼任评分（一致性偏差），也不要让 coach 出题（速度优先，质量退化）。
 - 所有 LLM 输出走 `structuredOutput: { schema }`，schema 失败直接抛，**不要静默 fallback**，否则脏数据会进库。
 - 改 prompt 务必加示例。LLM 对抽象规则的执行率远低于"给 Good / Bad 案例"。
 
-### 5.5 三个 skill（/ingest-corpus / /corpus-confirm / /dict-confirm）
+### 5.6 三个 skill（/ingest-corpus / /corpus-confirm / /dict-confirm）
 
 - 不要把它们"升级"成内部 agent。存在的全部意义就是**不绑模型**，可在不同 AI agent 平台复用。
 - 不要让它们跑全量。corpus-confirm / dict-confirm 每次 30-50 条；ingest-corpus 一次 30-60 条。给宿主 AI 推理空间。
 - 已 `aiConfirmed` 的不会再出现在 pending；要强制重判必须手动从对应分片 jsonl 删 `aiConfirmed` 字段（dict 按 lemma，corpus 按 id）。
 - dict-confirm / corpus-confirm 写回时会按 aiConfirmed 后的 effective difficulty 自动迁移分片；如果手工改 JSONL，记得保持条目所在 `d{N}.jsonl` 与 effective difficulty 一致。
 
-### 5.6 端口冲突
+### 5.7 端口冲突
 
 `PORT=5174`（server）/ `5173`（vite）。如果上次进程没退干净：
 
